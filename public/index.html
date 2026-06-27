@@ -61,6 +61,15 @@
   <section id="result-section" style="display:none">
     <h2>Blueprint</h2>
     <div id="stats"></div>
+    <div id="walkthrough" style="display:none; margin:8px 0; padding:8px 10px; background:#f4f4f2; border-radius:8px;">
+      <div class="row" style="align-items:center; gap:10px;">
+        <button id="wt-prev">◀ Prev</button>
+        <strong id="wt-label" style="min-width:120px; text-align:center;">Step 0</strong>
+        <button id="wt-next">Next ▶</button>
+        <button id="wt-all">Show all</button>
+        <span id="wt-detail" style="font-size:13px; color:#444;"></span>
+      </div>
+    </div>
     <div id="viewer"></div>
     <div id="loadsheet"></div>
     <button onclick="window.print()">Print load sheet</button>

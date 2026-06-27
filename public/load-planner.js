@@ -108,6 +108,7 @@ document.getElementById('pack-btn').onclick = async () => {
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
 let _threeRenderer = null, _animId = null;
+let _boxMeshes = [], _placements = [], _loadStep = 0;
 
 function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
@@ -164,6 +165,7 @@ function renderBlueprint(result) {
   truckEdges.position.set(truck.length / 2, truck.height / 2, truck.width / 2);
   scene.add(truckEdges);
 
+  _boxMeshes = [];
   for (const p of result.placements) {
     const geo = new THREE.BoxGeometry(p.length_cm, p.height_cm, p.width_cm);
     const color = STOP_COLORS[p.stop_index % STOP_COLORS.length];
@@ -172,7 +174,9 @@ function renderBlueprint(result) {
     mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
       new THREE.LineBasicMaterial({ color: 0x222222 })));
     scene.add(mesh);
+    _boxMeshes.push({ order: p.load_order, mesh });
   }
+  setupWalkthrough(result.placements);
 
   const maxDim = Math.max(truck.length, truck.width, truck.height);
   camera.position.set(truck.length * 1.4, truck.height * 1.6, truck.width * 2.2);
@@ -187,6 +191,40 @@ function renderBlueprint(result) {
     camera.lookAt(truck.length / 2, truck.height / 2, truck.width / 2);
     renderer.render(scene, camera);
   })();
+}
+
+function setupWalkthrough(placements) {
+  _placements = [...placements].sort((a, b) => a.load_order - b.load_order);
+  _loadStep = 0; // 0 = show everything
+  const bar = document.getElementById('walkthrough');
+  bar.style.display = _placements.length ? 'block' : 'none';
+  document.getElementById('wt-prev').onclick = () => setLoadStep(Math.max(1, _loadStep - 1));
+  document.getElementById('wt-next').onclick = () =>
+    setLoadStep(_loadStep >= _placements.length ? _placements.length : _loadStep + 1);
+  document.getElementById('wt-all').onclick = () => setLoadStep(0);
+  setLoadStep(0);
+}
+
+// step 0 = show all; step n = show the first n boxes in load order, highlight box n.
+function setLoadStep(n) {
+  _loadStep = n;
+  const total = _placements.length;
+  for (const b of _boxMeshes) {
+    const visible = n === 0 || b.order <= n;
+    b.mesh.visible = visible;
+    const isCurrent = n !== 0 && b.order === n;
+    b.mesh.material.emissive.setHex(isCurrent ? 0x333300 : 0x000000);
+  }
+  const label = document.getElementById('wt-label');
+  const detail = document.getElementById('wt-detail');
+  if (n === 0) {
+    label.textContent = `All ${total} boxes`;
+    detail.textContent = 'Step through to see load order';
+  } else {
+    const p = _placements[n - 1];
+    label.textContent = `Load ${n} of ${total}`;
+    detail.textContent = `→ stop ${p.stop_index + 1}, position (${Math.round(p.x_cm)}, ${Math.round(p.y_cm)}, ${Math.round(p.z_cm)}) cm`;
+  }
 }
 
 function currentTruckDims() {
