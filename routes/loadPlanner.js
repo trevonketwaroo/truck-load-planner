@@ -163,7 +163,7 @@ module.exports = function loadPlannerRoutes(pool) {
       const stopIndex = Object.fromEntries(stops.rows.map((s) => [s.id, s.sequence_index]));
 
       const items = await pool.query(
-        `SELECT ti.id, ti.product_id, ti.stop_id, ti.quantity,
+        `SELECT ti.id, ti.product_id, ti.stop_id, ti.quantity, p.name,
                 p.length_cm, p.width_cm, p.height_cm, p.weight_kg, p.stackable, p.top_only
          FROM trip_items ti JOIN products p ON p.id = ti.product_id
          WHERE ti.trip_id=$1`, [tripId]);
@@ -199,6 +199,14 @@ module.exports = function loadPlannerRoutes(pool) {
 
       const result = pack(input);
       result.unplaced = [...result.unplaced, ...orphanUnplaced];
+      // Enrich each placement with the product it belongs to (box_id = "<trip_item_id>-<n>")
+      const itemMeta = Object.fromEntries(
+        validRows.map((it) => [String(it.id), { product_id: it.product_id, product_name: it.name }]));
+      result.placements.forEach((p) => {
+        const meta = itemMeta[String(p.box_id).split('-')[0]];
+        p.product_id = meta ? meta.product_id : null;
+        p.product_name = meta ? meta.product_name : null;
+      });
       await pool.query(
         `UPDATE trips SET packing_result=$1, status='packed' WHERE id=$2`,
         [JSON.stringify(result), tripId]);
