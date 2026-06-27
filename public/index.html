@@ -4,76 +4,94 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Truck Load Planner</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; max-width: 900px; }
-    section { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
-    label { display: block; font-size: 13px; color: #555; margin-top: 8px; }
-    input, select, button { font: inherit; padding: 6px 8px; }
-    button { cursor: pointer; border-radius: 8px; border: 1px solid #888; background: #fff; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
-    .stop, .item { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
-    #viewer { width: 100%; height: 420px; border: 1px solid #ccc; border-radius: 10px; }
-    .stat { display: inline-block; min-width: 120px; padding: 8px; background: #f4f4f2; border-radius: 8px; margin: 4px; }
-  </style>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h1>Truck load planner</h1>
-  <nav style="margin:-6px 0 14px;"><a href="/products.html" style="font-size:14px;">→ Manage product sizes</a></nav>
+  <header class="app-header">
+    <a class="brand" href="/">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 3h13v10H1z" />
+          <path d="M14 7h4l3 3v3h-7z" />
+          <circle cx="6" cy="17" r="1.8" />
+          <circle cx="17.5" cy="17" r="1.8" />
+        </svg>
+      </span>
+      Truck Load Planner
+    </a>
+    <span class="spacer"></span>
+    <a class="nav-link" href="/products.html">Manage product sizes →</a>
+  </header>
 
-  <section id="truck-section">
-    <h2>Truck</h2>
-    <select id="truck-select"></select>
-    <details>
-      <summary>Add a truck</summary>
+  <main class="page">
+    <h1 class="page-title">Plan a load</h1>
+    <p class="page-sub">Pick a truck, build the trip, and pack it for a clean LIFO unload at every stop.</p>
+
+    <section id="truck-section">
+      <h2>Truck</h2>
+      <select id="truck-select"></select>
+      <details>
+        <summary>Add a truck</summary>
+        <div class="row">
+          <label>Name <input id="t-name" placeholder="e.g. Canter 3.5t" /></label>
+          <label>Length cm <input id="t-l" type="number" /></label>
+          <label>Width cm <input id="t-w" type="number" /></label>
+          <label>Height cm <input id="t-h" type="number" /></label>
+          <label>Max kg <input id="t-max" type="number" /></label>
+          <button id="add-truck" class="btn-primary">Save truck</button>
+        </div>
+      </details>
+    </section>
+
+    <section>
+      <h2>Trip</h2>
       <div class="row">
-        <label>Name <input id="t-name" /></label>
-        <label>Length cm <input id="t-l" type="number" /></label>
-        <label>Width cm <input id="t-w" type="number" /></label>
-        <label>Height cm <input id="t-h" type="number" /></label>
-        <label>Max kg <input id="t-max" type="number" /></label>
-        <button id="add-truck">Save truck</button>
+        <label>Trip name <input id="trip-name" placeholder="Friday run" /></label>
+        <label>Priority
+          <select id="preset">
+            <option value="balanced">Balanced</option>
+            <option value="heavy_load">Heavy load</option>
+            <option value="many_stops">Many stops</option>
+          </select>
+        </label>
+        <button id="new-trip" class="btn-primary">Start trip</button>
       </div>
-    </details>
-  </section>
 
-  <section>
-    <h2>Trip</h2>
-    <div class="row">
-      <label>Trip name <input id="trip-name" /></label>
-      <label>Priority
-        <select id="preset">
-          <option value="balanced">Balanced</option>
-          <option value="heavy_load">Heavy load</option>
-          <option value="many_stops">Many stops</option>
-        </select>
-      </label>
-      <button id="new-trip">Start trip</button>
-    </div>
-    <div id="stops"></div>
-    <button id="add-stop">+ Stop</button>
-    <div id="items"></div>
-    <button id="add-item">+ Item</button>
-    <div class="row" style="margin-top:12px">
-      <button id="pack-btn">Pack truck</button>
-    </div>
-  </section>
+      <div id="stops"></div>
+      <div class="add-row"><button id="add-stop" class="btn-ghost">+ Stop</button></div>
 
-  <section id="result-section" style="display:none">
-    <h2>Blueprint</h2>
-    <div id="stats"></div>
-    <div id="walkthrough" style="display:none; margin:8px 0; padding:8px 10px; background:#f4f4f2; border-radius:8px;">
-      <div class="row" style="align-items:center; gap:10px;">
-        <button id="wt-prev">◀ Prev</button>
-        <strong id="wt-label" style="min-width:120px; text-align:center;">Step 0</strong>
-        <button id="wt-next">Next ▶</button>
-        <button id="wt-all">Show all</button>
-        <span id="wt-detail" style="font-size:13px; color:#444;"></span>
+      <div id="items"></div>
+      <div class="add-row"><button id="add-item" class="btn-ghost">+ Item</button></div>
+
+      <div class="step-actions">
+        <span class="grow"></span>
+        <button id="pack-btn" class="btn-primary">Pack truck</button>
       </div>
-    </div>
-    <div id="viewer"></div>
-    <div id="loadsheet"></div>
-    <button onclick="window.print()">Print load sheet</button>
-  </section>
+    </section>
+
+    <section id="result-section" style="display:none">
+      <div class="card-head">
+        <h2>Blueprint</h2>
+        <button class="btn-ghost print-btn" onclick="window.print()">Print load sheet</button>
+      </div>
+      <div id="stats"></div>
+      <div id="walkthrough" style="display:none">
+        <div class="row">
+          <button id="wt-prev" class="btn-ghost">◀ Prev</button>
+          <strong id="wt-label">Step 0</strong>
+          <button id="wt-next" class="btn-ghost">Next ▶</button>
+          <button id="wt-all" class="btn-ghost">Show all</button>
+          <span id="wt-detail"></span>
+        </div>
+      </div>
+      <div id="viewer"></div>
+      <div id="loadsheet"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    Truck Load Planner · 3D LIFO packing for the crew
+  </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="load-planner.js"></script>

@@ -50,11 +50,11 @@ document.getElementById('new-trip').onclick = async () => {
 
 function renderStops() {
   document.getElementById('stops').innerHTML = state.stops.map((s, i) =>
-    `<div class="stop">#${i + 1}
+    `<div class="stop"><span class="row-num">#${i + 1}</span>
        <input value="${esc(s.label || '')}" oninput="updateStop(${i}, this.value)" placeholder="Place" />
-       <button onclick="moveStop(${i},-1)">↑</button>
-       <button onclick="moveStop(${i},1)">↓</button>
-       <button onclick="removeStop(${i})">✕</button></div>`).join('');
+       <button onclick="moveStop(${i},-1)" title="Move up">↑</button>
+       <button onclick="moveStop(${i},1)" title="Move down">↓</button>
+       <button onclick="removeStop(${i})" title="Remove">✕</button></div>`).join('');
 }
 window.updateStop = (i, v) => { state.stops[i].label = v; };
 window.moveStop = (i, d) => {
@@ -74,8 +74,8 @@ function renderItems() {
     return `<div class="item">
        <select onchange="updateItem(${i},'stopIdx',+this.value)">${stopOpts}</select>
        <select onchange="updateItem(${i},'product_id',+this.value)">${prodOpts}</select>
-       <input type="number" min="1" value="${it.quantity}" oninput="updateItem(${i},'quantity',+this.value)" style="width:70px" />
-       <button onclick="removeItem(${i})">✕</button></div>`;
+       <input type="number" min="1" value="${it.quantity}" oninput="updateItem(${i},'quantity',+this.value)" />
+       <button onclick="removeItem(${i})" title="Remove">✕</button></div>`;
   }).join('');
 }
 window.updateItem = (i, k, v) => { state.items[i][k] = v; };
@@ -115,12 +115,12 @@ function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
   const s = result.stats;
   document.getElementById('stats').innerHTML = `
-    <span class="stat">Space ${s.volume_used_pct}%</span>
-    <span class="stat">Weight ${s.total_weight_kg}/${s.max_payload_kg} kg</span>
-    <span class="stat">Balance L ${s.balance_left_pct} / R ${s.balance_right_pct}</span>
-    <span class="stat">Front ${s.balance_front_pct} / Rear ${s.balance_rear_pct}</span>
-    ${(s.warnings || []).map((w) => `<span class="stat" style="background:#fcebeb">${esc(w)}</span>`).join('')}
-    ${result.unplaced.length ? `<span class="stat" style="background:#faeeda">${result.unplaced.length} unplaced</span>` : ''}`;
+    <span class="stat"><span class="stat-label">Space used</span><span class="stat-value">${s.volume_used_pct}%</span></span>
+    <span class="stat"><span class="stat-label">Weight</span><span class="stat-value">${s.total_weight_kg}<span class="stat-unit"> / ${s.max_payload_kg} kg</span></span></span>
+    <span class="stat"><span class="stat-label">Balance L / R</span><span class="stat-value">${s.balance_left_pct} / ${s.balance_right_pct}</span></span>
+    <span class="stat"><span class="stat-label">Front / Rear</span><span class="stat-value">${s.balance_front_pct} / ${s.balance_rear_pct}</span></span>
+    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}
+    ${result.unplaced.length ? `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>` : ''}`;
 
   // Full load order (how to load it, deepest first)
   const sheet = [...result.placements].sort((a, b) => a.load_order - b.load_order)
