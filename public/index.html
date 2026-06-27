@@ -28,7 +28,7 @@
     <p class="page-sub">Pick a truck, build the trip, and pack it for a clean LIFO unload at every stop.</p>
 
     <section id="truck-section">
-      <h2>Truck</h2>
+      <h2><span class="step-badge">1</span> Truck</h2>
       <select id="truck-select"></select>
       <details>
         <summary>Add a truck</summary>
@@ -44,7 +44,7 @@
     </section>
 
     <section>
-      <h2>Trip</h2>
+      <h2><span class="step-badge">2</span> Start the trip</h2>
       <div class="row">
         <label>Trip name <input id="trip-name" placeholder="Friday run" /></label>
         <label>Priority
@@ -56,16 +56,25 @@
         </label>
         <button id="new-trip" class="btn-primary">Start trip</button>
       </div>
+      <div id="trip-status" class="trip-status" style="display:none"></div>
 
-      <div id="stops"></div>
-      <div class="add-row"><button id="add-stop" class="btn-ghost">+ Stop</button></div>
+      <div id="trip-body" class="trip-body">
+        <div class="sub-step-label"><span class="step-badge step-badge--sm">3</span> Delivery stops</div>
+        <div id="stops"></div>
+        <div id="stops-hint" class="empty-hint">No stops yet — click <strong>+ Stop</strong> to add your first delivery stop.</div>
+        <div class="add-row"><button id="add-stop" class="btn-ghost">+ Stop</button></div>
 
-      <div id="items"></div>
-      <div class="add-row"><button id="add-item" class="btn-ghost">+ Item</button></div>
+        <div class="sub-step-label" style="margin-top:18px"><span class="step-badge step-badge--sm">4</span> What to load</div>
+        <div id="items"></div>
+        <div id="items-hint" class="empty-hint">No items yet — click <strong>+ Item</strong>, then choose a stop, product, and quantity.</div>
+        <div class="add-row"><button id="add-item" class="btn-ghost">+ Item</button></div>
 
-      <div class="step-actions">
-        <span class="grow"></span>
-        <button id="pack-btn" class="btn-primary">Pack truck</button>
+        <div class="step-actions">
+          <span class="step-badge step-badge--inline">5</span>
+          <span id="pack-hint" class="pack-hint"></span>
+          <span class="grow"></span>
+          <button id="pack-btn" class="btn-primary">Pack truck</button>
+        </div>
       </div>
     </section>
 

@@ -35,17 +35,29 @@ async function loadProducts() {
 }
 
 document.getElementById('new-trip').onclick = async () => {
+  const truckSel = document.getElementById('truck-select');
+  const statusEl = document.getElementById('trip-status');
+  if (!truckSel.options.length) {
+    statusEl.textContent = '⚠ No trucks available — add a truck first (see Step 1 above).';
+    statusEl.className = 'trip-status is-warning';
+    statusEl.style.display = '';
+    return;
+  }
   const trip = await api('/trips', {
     method: 'POST',
     body: JSON.stringify({
       name: document.getElementById('trip-name').value || 'Trip',
-      truck_id: +document.getElementById('truck-select').value,
+      truck_id: +truckSel.value,
       priority_preset: document.getElementById('preset').value,
     }),
   });
   state.tripId = trip.id;
   state.stops = []; state.items = [];
-  renderStops(); renderItems();
+  statusEl.textContent = '✓ Trip started — now add your stops and items below.';
+  statusEl.className = 'trip-status is-success';
+  statusEl.style.display = '';
+  document.getElementById('trip-body').classList.remove('is-gated');
+  renderStops(); renderItems(); checkPackReady();
 };
 
 function renderStops() {
@@ -55,8 +67,11 @@ function renderStops() {
        <button onclick="moveStop(${i},-1)" title="Move up">↑</button>
        <button onclick="moveStop(${i},1)" title="Move down">↓</button>
        <button onclick="removeStop(${i})" title="Remove">✕</button></div>`).join('');
+  const hint = document.getElementById('stops-hint');
+  if (hint) hint.classList.toggle('is-hidden', state.stops.length > 0);
+  checkPackReady();
 }
-window.updateStop = (i, v) => { state.stops[i].label = v; };
+window.updateStop = (i, v) => { state.stops[i].label = v; checkPackReady(); };
 window.moveStop = (i, d) => {
   const j = i + d; if (j < 0 || j >= state.stops.length) return;
   [state.stops[i], state.stops[j]] = [state.stops[j], state.stops[i]];
@@ -77,6 +92,9 @@ function renderItems() {
        <input type="number" min="1" value="${it.quantity}" oninput="updateItem(${i},'quantity',+this.value)" />
        <button onclick="removeItem(${i})" title="Remove">✕</button></div>`;
   }).join('');
+  const hint = document.getElementById('items-hint');
+  if (hint) hint.classList.toggle('is-hidden', state.items.length > 0);
+  checkPackReady();
 }
 window.updateItem = (i, k, v) => { state.items[i][k] = v; };
 window.removeItem = (i) => { state.items.splice(i, 1); renderItems(); };
@@ -84,6 +102,31 @@ document.getElementById('add-item').onclick = () => {
   state.items.push({ stopIdx: 0, product_id: state.products[0]?.id, quantity: 1 });
   renderItems();
 };
+
+function checkPackReady() {
+  const btn = document.getElementById('pack-btn');
+  const hint = document.getElementById('pack-hint');
+  if (!btn) return;
+
+  let msg = '';
+  if (!state.tripId) {
+    msg = 'Start a trip first (Step 2).';
+  } else if (!state.stops.length || !state.stops.some((s) => (s.label || '').trim())) {
+    msg = 'Add at least one stop with a name.';
+  } else if (!state.items.length) {
+    msg = 'Add at least one item to load.';
+  }
+
+  if (msg) {
+    btn.classList.add('is-disabled');
+    btn.setAttribute('disabled', '');
+    if (hint) hint.textContent = msg;
+  } else {
+    btn.classList.remove('is-disabled');
+    btn.removeAttribute('disabled');
+    if (hint) hint.textContent = '';
+  }
+}
 
 document.getElementById('pack-btn').onclick = async () => {
   if (!state.tripId) return alert('Start a trip first');
@@ -99,11 +142,19 @@ document.getElementById('pack-btn').onclick = async () => {
   const result = await api(`/trips/${state.tripId}/pack`, { method: 'POST' });
   if (result.error) { alert(result.error); return; }
   showResult(result);
+  document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
 };
 
 (async function init() {
   await loadTrucks();
   await loadProducts();
+  // Gate steps 3-5 until a trip is started
+  document.getElementById('trip-body').classList.add('is-gated');
+  // Show empty-state hints from the start
+  renderStops();
+  renderItems();
+  // Initial readiness check (will set pack button disabled)
+  checkPackReady();
 })();
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
