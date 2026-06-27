@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: truck-load-planner
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Truck Load Planner</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; max-width: 900px; }
+    section { border: 1px solid #ddd; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    label { display: block; font-size: 13px; color: #555; margin-top: 8px; }
+    input, select, button { font: inherit; padding: 6px 8px; }
+    button { cursor: pointer; border-radius: 8px; border: 1px solid #888; background: #fff; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+    .stop, .item { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+    #viewer { width: 100%; height: 420px; border: 1px solid #ccc; border-radius: 10px; }
+    .stat { display: inline-block; min-width: 120px; padding: 8px; background: #f4f4f2; border-radius: 8px; margin: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Truck load planner</h1>
+
+  <section id="truck-section">
+    <h2>Truck</h2>
+    <select id="truck-select"></select>
+    <details>
+      <summary>Add a truck</summary>
+      <div class="row">
+        <label>Name <input id="t-name" /></label>
+        <label>Length cm <input id="t-l" type="number" /></label>
+        <label>Width cm <input id="t-w" type="number" /></label>
+        <label>Height cm <input id="t-h" type="number" /></label>
+        <label>Max kg <input id="t-max" type="number" /></label>
+        <button id="add-truck">Save truck</button>
+      </div>
+    </details>
+  </section>
+
+  <section>
+    <h2>Trip</h2>
+    <div class="row">
+      <label>Trip name <input id="trip-name" /></label>
+      <label>Priority
+        <select id="preset">
+          <option value="balanced">Balanced</option>
+          <option value="heavy_load">Heavy load</option>
+          <option value="many_stops">Many stops</option>
+        </select>
+      </label>
+      <button id="new-trip">Start trip</button>
+    </div>
+    <div id="stops"></div>
+    <button id="add-stop">+ Stop</button>
+    <div id="items"></div>
+    <button id="add-item">+ Item</button>
+    <div class="row" style="margin-top:12px">
+      <button id="pack-btn">Pack truck</button>
+    </div>
+  </section>
+
+  <section id="result-section" style="display:none">
+    <h2>Blueprint</h2>
+    <div id="stats"></div>
+    <div id="viewer"></div>
+    <div id="loadsheet"></div>
+    <button onclick="window.print()">Print load sheet</button>
+  </section>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="load-planner.js"></script>
+</body>
+</html>

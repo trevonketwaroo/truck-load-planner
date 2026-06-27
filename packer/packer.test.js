@@ -1,0 +1,223 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { expandBoxes } = require('./packer');
+
+
+test('expandBoxes makes one box per unit', () => {
+  const { boxes, unplaced } = expandBoxes([
+    { id: 1, product_id: 7, stop_index: 0, quantity: 3,
+      length_cm: 40, width_cm: 30, height_cm: 20, weight_kg: 5,
+      stackable: true, top_only: false },
+  ]);
+  assert.equal(boxes.length, 3);
+  assert.equal(unplaced.length, 0);
+  assert.equal(boxes[0].l, 40);
+  assert.equal(boxes[0].weight, 5);
+  assert.equal(boxes[2].id, '1-2');
+});
+
+test('expandBoxes flags unmeasured items', () => {
+  const { boxes, unplaced } = expandBoxes([
+    { id: 9, product_id: 2, stop_index: 1, quantity: 2,
+      length_cm: null, width_cm: 30, height_cm: 20, weight_kg: 5 },
+  ]);
+  assert.equal(boxes.length, 0);
+  assert.equal(unplaced.length, 1);
+  assert.equal(unplaced[0].reason, 'unmeasured');
+});
+
+const { placeBoxes } = require('./packer');
+
+const truck = { length: 600, width: 240, height: 240, max_payload: 2000 };
+
+function box(id, stop, l, w, h, weight, opts = {}) {
+  return { id, stop_index: stop, l, w, h, weight,
+    stackable: opts.stackable !== false, top_only: !!opts.top_only };
+}
+
+function overlaps(a, b) {
+  return a.x_cm < b.x_cm + b.length_cm && a.x_cm + a.length_cm > b.x_cm &&
+         a.y_cm < b.y_cm + b.width_cm  && a.y_cm + a.width_cm  > b.y_cm &&
+         a.z_cm < b.z_cm + b.height_cm && a.z_cm + a.height_cm > b.z_cm;
+}
+
+test('placeBoxes produces no overlaps and stays in bounds', () => {
+  const boxes = [];
+  for (let s = 0; s < 3; s++)
+    for (let i = 0; i < 6; i++) boxes.push(box(`${s}-${i}`, s, 60, 60, 60, 10));
+  const { placements, unplaced } = placeBoxes(boxes, truck, 'balanced');
+  assert.equal(unplaced.length, 0);
+  for (const p of placements) {
+    assert.ok(p.x_cm >= 0 && p.x_cm + p.length_cm <= truck.length);
+    assert.ok(p.y_cm >= 0 && p.y_cm + p.width_cm  <= truck.width);
+    assert.ok(p.z_cm >= 0 && p.z_cm + p.height_cm <= truck.height);
+  }
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      assert.ok(!overlaps(placements[i], placements[j]),
+        `overlap ${placements[i].box_id} / ${placements[j].box_id}`);
+});
+
+test('earlier stops are not buried behind later stops', () => {
+  const boxes = [box('a', 0, 100, 100, 100, 10), box('b', 2, 100, 100, 100, 10)];
+  const { placements } = placeBoxes(boxes, truck, 'balanced');
+  const a = placements.find((p) => p.box_id === 'a');
+  const b = placements.find((p) => p.box_id === 'b');
+  assert.ok(a.x_cm <= b.x_cm, 'stop 0 must be at or in front of stop 2');
+});
+
+test('placeBoxes reports boxes that do not fit', () => {
+  const tooBig = box('huge', 0, 9999, 9999, 9999, 1);
+  const { placements, unplaced } = placeBoxes([tooBig], truck, 'balanced');
+  assert.equal(placements.length, 0);
+  assert.equal(unplaced[0].reason, 'no_space');
+});
+
+const { computeStats } = require('./packer');
+
+test('computeStats reports volume, weight and balance', () => {
+  const boxes = [box('a', 0, 120, 120, 120, 100), box('b', 0, 120, 120, 120, 100)];
+  const { placements } = placeBoxes(boxes, truck, 'balanced');
+  const stats = computeStats(placements, boxes, truck);
+  assert.ok(stats.volume_used_pct > 0 && stats.volume_used_pct <= 100);
+  assert.equal(stats.total_weight_kg, 200);
+  assert.equal(stats.max_payload_kg, 2000);
+  assert.equal(stats.balance_left_pct + stats.balance_right_pct, 100);
+});
+
+test('computeStats warns on side imbalance', () => {
+  const boxes = [box('a', 0, 100, 100, 100, 500)];
+  const { placements } = placeBoxes(boxes, truck, 'balanced');
+  const stats = computeStats(placements, boxes, truck);
+  assert.ok(stats.warnings.some((w) => /imbalance/i.test(w)));
+});
+
+const { pack } = require('./packer');
+
+test('pack returns placements, stats and load order; is deterministic', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 2000 },
+    stops: [{ sequence_index: 0 }, { sequence_index: 1 }],
+    boxes: null,
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 2,
+        length_cm: 60, width_cm: 60, height_cm: 60, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 1, quantity: 2,
+        length_cm: 60, width_cm: 60, height_cm: 60, weight_kg: 10 },
+    ],
+    preset: 'balanced',
+  };
+  const r1 = pack(input);
+  const r2 = pack(input);
+  assert.deepEqual(r1, r2);
+  assert.equal(r1.placements.length, 4);
+  const orders = r1.placements.map((p) => p.load_order).sort((a, b) => a - b);
+  assert.deepEqual(orders, [1, 2, 3, 4]);
+  // deepest (largest x) box loads first (load_order 1)
+  const first = r1.placements.find((p) => p.load_order === 1);
+  const last = r1.placements.find((p) => p.load_order === 4);
+  assert.ok(first.x_cm >= last.x_cm);
+});
+
+test('pack moves overweight excess to unplaced', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 15 },
+    stops: [{ sequence_index: 0 }],
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 3,
+        length_cm: 40, width_cm: 40, height_cm: 40, weight_kg: 10 },
+    ],
+    preset: 'balanced',
+  };
+  const r = pack(input);
+  assert.ok(r.stats.total_weight_kg <= 15);
+  assert.ok(r.unplaced.some((u) => u.reason === 'over_weight'));
+});
+
+const { enforceWeightCap } = require('./packer');
+
+test('expandBoxes flags zero/invalid quantity', () => {
+  const { boxes, unplaced } = expandBoxes([
+    { id: 5, product_id: 3, stop_index: 0, quantity: 0,
+      length_cm: 40, width_cm: 30, height_cm: 20, weight_kg: 5 },
+  ]);
+  assert.equal(boxes.length, 0);
+  assert.equal(unplaced.length, 1);
+  assert.equal(unplaced[0].reason, 'zero_quantity');
+});
+
+test('pack tolerates null/missing items', () => {
+  const truckIn = { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 2000 };
+  const r1 = pack({ truck: truckIn, stops: [], items: null, preset: 'balanced' });
+  const r2 = pack({ truck: truckIn, stops: [], preset: 'balanced' });
+  assert.equal(r1.placements.length, 0);
+  assert.equal(r2.placements.length, 0);
+  assert.deepEqual(r1.unplaced, []);
+});
+
+test('top_only box sits on top of regular boxes without overlap', () => {
+  const boxes = [
+    box('reg', 0, 100, 100, 100, 10),
+    box('top', 0, 100, 100, 50, 5, { top_only: true }),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, truck, 'balanced');
+  assert.equal(unplaced.length, 0);
+  const reg = placements.find((p) => p.box_id === 'reg');
+  const top = placements.find((p) => p.box_id === 'top');
+  assert.ok(top.z_cm >= reg.z_cm + reg.height_cm,
+    'top_only box must rest at or above the regular box top surface');
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      assert.ok(!overlaps(placements[i], placements[j]),
+        `overlap ${placements[i].box_id} / ${placements[j].box_id}`);
+});
+
+test('enforceWeightCap drops latest-stop/lightest first under cap', () => {
+  const boxes = [
+    box('a', 0, 40, 40, 40, 30),
+    box('b', 1, 40, 40, 40, 20),
+    box('c', 2, 40, 40, 40, 10),
+  ];
+  // total = 60, cap = 35 -> must drop until <= 35.
+  // order to drop: latest stop first (c@2), then b@1; dropping both = 30 left (<=35), a kept.
+  const { kept, dropped } = enforceWeightCap(boxes, 35);
+  const keptTotal = kept.reduce((s, b) => s + b.weight, 0);
+  assert.ok(keptTotal <= 35);
+  const keptIds = kept.map((b) => b.id).sort();
+  assert.deepEqual(keptIds, ['a']);
+  const droppedIds = dropped.map((d) => d.box_id).sort();
+  assert.deepEqual(droppedIds, ['b', 'c']);
+  assert.ok(dropped.every((d) => d.reason === 'over_weight'));
+});
+
+test('heavy_load preset orders the heaviest box first in its band', () => {
+  // Heavy box given LAST in input; heavy_load must sort it to the front of
+  // the band, so it is the first placement emitted for that stop.
+  const boxes = [
+    box('light_big', 0, 120, 120, 120, 5),
+    box('heavy_small', 0, 60, 60, 60, 50),
+  ];
+  const { placements } = placeBoxes(boxes, truck, 'heavy_load');
+  // First placement for stop 0 should be the heaviest box.
+  const band = placements.filter((p) => p.stop_index === 0);
+  assert.equal(band[0].box_id, 'heavy_small',
+    'heaviest box should be placed first under heavy_load');
+  const heavy = band.find((p) => p.box_id === 'heavy_small');
+  const light = band.find((p) => p.box_id === 'light_big');
+  assert.ok(heavy.x_cm <= light.x_cm,
+    'heaviest box should never be deeper than the lighter one');
+});
+
+test('many_stops preset orders the largest box first in its band', () => {
+  // heavy-but-small vs light-but-big in one stop. balanced/heavy_load lead with the
+  // heavy one; many_stops leads with the bigger one (size-first).
+  const boxes = [
+    box('heavy_small', 0, 40, 40, 40, 200),
+    box('light_big', 0, 120, 120, 120, 10),
+  ];
+  const { placements } = placeBoxes(boxes, truck, 'many_stops');
+  const heavy = placements.find((p) => p.box_id === 'heavy_small');
+  const big = placements.find((p) => p.box_id === 'light_big');
+  assert.ok(big.x_cm <= heavy.x_cm,
+    'many_stops should place the largest box first (smallest x)');
+});

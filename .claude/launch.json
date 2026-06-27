@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "truckplanner",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.js"],
+      "port": 5060,
+      "autoPort": false
+    }
+  ]
+}
