@@ -221,3 +221,50 @@ test('many_stops preset orders the largest box first in its band', () => {
   assert.ok(big.x_cm <= heavy.x_cm,
     'many_stops should place the largest box first (smallest x)');
 });
+
+test('pack: no box floats — every box rests on the floor or another box', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 5000 },
+    stops: [{ sequence_index: 0 }, { sequence_index: 1 }],
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 8,
+        length_cm: 60, width_cm: 40, height_cm: 30, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 1, quantity: 6,
+        length_cm: 80, width_cm: 45, height_cm: 16, weight_kg: 8, top_only: true },
+    ],
+    preset: 'balanced',
+  };
+  const { placements } = pack(input);
+  const overlap = (a, b) =>
+    a.x_cm < b.x_cm + b.length_cm && a.x_cm + a.length_cm > b.x_cm &&
+    a.y_cm < b.y_cm + b.width_cm && a.y_cm + a.width_cm > b.y_cm;
+  for (const box of placements) {
+    if (box.z_cm === 0) continue;
+    const supported = placements.some((o) => o !== box && overlap(box, o) &&
+      Math.abs((o.z_cm + o.height_cm) - box.z_cm) < 0.001);
+    assert.ok(supported, `box ${box.box_id} floats at z=${box.z_cm}`);
+  }
+});
+
+test('pack: load is anchored flush against the cab (far) wall', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 5000 },
+    stops: [{ sequence_index: 0 }],
+    items: [{ id: 1, product_id: 1, stop_index: 0, quantity: 4,
+      length_cm: 60, width_cm: 40, height_cm: 30, weight_kg: 10 }],
+    preset: 'balanced',
+  };
+  const { placements } = pack(input);
+  const maxX = Math.max(...placements.map((p) => p.x_cm + p.length_cm));
+  assert.equal(maxX, 600);
+});
+
+test('applyGravity drops a floating box to the floor', () => {
+  const placements = [
+    { box_id: 'a', x_cm: 0, y_cm: 0, z_cm: 120, length_cm: 40, width_cm: 40, height_cm: 40 },
+  ];
+  applyGravity(placements);
+  assert.equal(placements[0].z_cm, 0);
+});
+
+const { applyGravity } = require("./packer");

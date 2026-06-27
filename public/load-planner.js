@@ -173,20 +173,32 @@ function showResult(result) {
     ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}
     ${result.unplaced.length ? `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>` : ''}`;
 
-  // Full load order (how to load it, deepest first)
-  const sheet = [...result.placements].sort((a, b) => a.load_order - b.load_order)
-    .map((p) => `<tr><td>${p.load_order}</td><td>stop ${p.stop_index + 1}</td>
-      <td>(${Math.round(p.x_cm)}, ${Math.round(p.y_cm)}, ${Math.round(p.z_cm)})</td></tr>`).join('');
+  // Load order as a human list: group boxes into sets (same product + stop) in
+  // load order. "Load 14× Milk for stop 1", etc. — what the crew actually needs.
+  const sorted = [...result.placements].sort((a, b) => a.load_order - b.load_order);
+  const loadSteps = [];
+  let cur = null;
+  for (const p of sorted) {
+    const key = `${p.product_name || 'Goods'}|${p.stop_index}`;
+    if (!cur || cur.key !== key) {
+      cur = { key, name: p.product_name || 'Goods', stop: p.stop_index, n: 0 };
+      loadSteps.push(cur);
+    }
+    cur.n++;
+  }
+  const loadRows = loadSteps.map((s, i) =>
+    `<tr><td>${i + 1}</td><td><strong>${s.n}×</strong> ${esc(s.name)}</td><td>Stop ${s.stop + 1}</td></tr>`).join('');
+
   // Per-stop unload view (what comes off at each stop)
   const stopsSet = [...new Set(result.placements.map((p) => p.stop_index))].sort((a, b) => a - b);
   const unloadView = stopsSet.map((si) => {
     const count = result.placements.filter((p) => p.stop_index === si).length;
-    return `<h4>Stop ${si + 1} — ${count} item(s) off</h4>`;
+    return `<h4>Stop ${si + 1} — ${count} item(s) come off</h4>`;
   }).join('');
   document.getElementById('loadsheet').innerHTML =
-    `<h3>Unload order</h3>${unloadView}
-     <h3>Load order (load deepest first)</h3>
-     <table border="1" cellpadding="4"><tr><th>Load #</th><th>Stop</th><th>Position (x,y,z) cm</th></tr>${sheet}</table>`;
+    `<h3>Load in this order (first item goes deepest)</h3>
+     <table class="loadsheet-table"><thead><tr><th>#</th><th>Load</th><th>For</th></tr></thead><tbody>${loadRows}</tbody></table>
+     <h3>Unload order</h3>${unloadView}`;
 
   renderBlueprint(result);
 }

@@ -166,6 +166,39 @@ function enforceWeightCap(boxes, maxPayload) {
   };
 }
 
+// Two placements overlap in the x-y footprint (the floor area they occupy).
+function footprintOverlap(a, b) {
+  return a.x_cm < b.x_cm + b.length_cm && a.x_cm + a.length_cm > b.x_cm &&
+         a.y_cm < b.y_cm + b.width_cm && a.y_cm + a.width_cm > b.y_cm;
+}
+
+// Gravity: drop every box straight down so it rests on the floor or on the top
+// of a box beneath it. Removes "floating" stacks. Process bottom-up so supports
+// settle before the boxes that rest on them.
+function applyGravity(placements) {
+  const ordered = [...placements].sort((a, b) => a.z_cm - b.z_cm);
+  const settled = [];
+  for (const box of ordered) {
+    let restZ = 0;
+    for (const other of settled) {
+      if (footprintOverlap(box, other)) {
+        restZ = Math.max(restZ, other.z_cm + other.height_cm);
+      }
+    }
+    box.z_cm = restZ;
+    settled.push(box);
+  }
+}
+
+// Anchor the whole load against the cab (far) wall so it builds end-to-end from
+// one wall instead of floating in the middle. Keeps relative stop order intact.
+function anchorToCab(placements, truck) {
+  if (!placements.length) return;
+  const maxX = Math.max(...placements.map((p) => p.x_cm + p.length_cm));
+  const shift = truck.length - maxX;
+  if (shift > 0) for (const p of placements) p.x_cm += shift;
+}
+
 function pack(input) {
   const truck = {
     length: Number(input.truck.length_cm),
@@ -177,6 +210,9 @@ function pack(input) {
   const { kept, dropped } = enforceWeightCap(boxes, truck.max_payload);
   const { placements, unplaced: noFit } = placeBoxes(kept, truck, input.preset || 'balanced');
 
+  applyGravity(placements);       // no floating boxes
+  anchorToCab(placements, truck); // load flush against the front wall
+
   // load order: deepest (largest x), then highest z, loads first
   placements.sort((a, b) => (b.x_cm - a.x_cm) || (b.z_cm - a.z_cm) ||
     String(a.box_id).localeCompare(String(b.box_id)));
@@ -186,4 +222,4 @@ function pack(input) {
   return { placements, stats, unplaced: [...unplaced, ...dropped, ...noFit] };
 }
 
-module.exports = { pack, expandBoxes, placeBoxes, computeStats, enforceWeightCap, round2 };
+module.exports = { pack, expandBoxes, placeBoxes, computeStats, enforceWeightCap, applyGravity, anchorToCab, footprintOverlap, round2 };
