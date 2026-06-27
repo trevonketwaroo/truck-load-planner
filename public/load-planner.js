@@ -108,7 +108,8 @@ document.getElementById('pack-btn').onclick = async () => {
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
 let _threeRenderer = null, _animId = null;
-let _boxMeshes = [], _placements = [], _loadStep = 0;
+let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
+let _anims = [], _truckH = 240;
 
 function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
@@ -165,16 +166,18 @@ function renderBlueprint(result) {
   truckEdges.position.set(truck.length / 2, truck.height / 2, truck.width / 2);
   scene.add(truckEdges);
 
+  _truckH = truck.height;
   _boxMeshes = [];
   for (const p of result.placements) {
     const geo = new THREE.BoxGeometry(p.length_cm, p.height_cm, p.width_cm);
     const color = STOP_COLORS[p.stop_index % STOP_COLORS.length];
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
-    mesh.position.set(p.x_cm + p.length_cm / 2, p.z_cm + p.height_cm / 2, p.y_cm + p.width_cm / 2);
+    const finalY = p.z_cm + p.height_cm / 2;
+    mesh.position.set(p.x_cm + p.length_cm / 2, finalY, p.y_cm + p.width_cm / 2);
     mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
       new THREE.LineBasicMaterial({ color: 0x222222 })));
     scene.add(mesh);
-    _boxMeshes.push({ order: p.load_order, mesh });
+    _boxMeshes.push({ order: p.load_order, mesh, finalY, placement: p });
   }
   setupWalkthrough(result.placements);
 
@@ -189,42 +192,90 @@ function renderBlueprint(result) {
     camera.position.x = truck.length / 2 + Math.cos(angle) * maxDim * 1.8;
     camera.position.z = truck.width / 2 + Math.sin(angle) * maxDim * 1.8;
     camera.lookAt(truck.length / 2, truck.height / 2, truck.width / 2);
+    stepAnimations();
     renderer.render(scene, camera);
   })();
 }
 
+// Group placements into "load steps": a run of same product going to the same stop,
+// in load order. Each step is one set of goods the crew loads together.
 function setupWalkthrough(placements) {
   _placements = [...placements].sort((a, b) => a.load_order - b.load_order);
-  _loadStep = 0; // 0 = show everything
+  _steps = [];
+  let cur = null;
+  for (const p of _placements) {
+    const key = `${p.product_name}|${p.stop_index}`;
+    if (!cur || cur.key !== key) {
+      cur = { key, product_name: p.product_name || 'Goods', stop_index: p.stop_index, orders: [] };
+      _steps.push(cur);
+    }
+    cur.orders.push(p.load_order);
+  }
+  // tag each box with its step number (1-based)
+  const stepOfOrder = {};
+  _steps.forEach((s, i) => s.orders.forEach((o) => { stepOfOrder[o] = i + 1; }));
+  for (const b of _boxMeshes) b.step = stepOfOrder[b.order] || 1;
+
+  _stepIndex = 0; // 0 = show whole load
   const bar = document.getElementById('walkthrough');
-  bar.style.display = _placements.length ? 'block' : 'none';
-  document.getElementById('wt-prev').onclick = () => setLoadStep(Math.max(1, _loadStep - 1));
+  bar.style.display = _steps.length ? 'block' : 'none';
+  document.getElementById('wt-prev').onclick = () => setStep(Math.max(1, _stepIndex - 1), true);
   document.getElementById('wt-next').onclick = () =>
-    setLoadStep(_loadStep >= _placements.length ? _placements.length : _loadStep + 1);
-  document.getElementById('wt-all').onclick = () => setLoadStep(0);
-  setLoadStep(0);
+    setStep(_stepIndex >= _steps.length ? _steps.length : _stepIndex + 1, true);
+  document.getElementById('wt-all').onclick = () => setStep(0, false);
+  setStep(0, false);
 }
 
-// step 0 = show all; step n = show the first n boxes in load order, highlight box n.
-function setLoadStep(n) {
-  _loadStep = n;
-  const total = _placements.length;
+// step 0 = show all at rest; step n = show sets 1..n, drop-animate set n.
+function setStep(n, animate) {
+  const goingForward = n > _stepIndex;
+  _stepIndex = n;
+  _anims = [];
   for (const b of _boxMeshes) {
-    const visible = n === 0 || b.order <= n;
+    const visible = n === 0 || b.step <= n;
     b.mesh.visible = visible;
-    const isCurrent = n !== 0 && b.order === n;
-    b.mesh.material.emissive.setHex(isCurrent ? 0x333300 : 0x000000);
+    const isCurrent = n !== 0 && b.step === n;
+    b.mesh.material.emissive.setHex(isCurrent ? 0x2a2a00 : 0x000000);
+    if (visible) b.mesh.position.y = b.finalY; // default at rest
   }
+  // animate the just-revealed set dropping into place
+  if (animate && goingForward && n >= 1) {
+    const setBoxes = _boxMeshes.filter((b) => b.step === n).sort((a, c) => a.order - c.order);
+    const now = performance.now();
+    setBoxes.forEach((b, i) => {
+      _anims.push({ mesh: b.mesh, fromY: b.finalY + _truckH * 0.9, toY: b.finalY,
+        start: now + i * 55, dur: 420 });
+      b.mesh.position.y = b.finalY + _truckH * 0.9;
+    });
+  }
+  updateStepLabel();
+}
+
+function updateStepLabel() {
   const label = document.getElementById('wt-label');
   const detail = document.getElementById('wt-detail');
-  if (n === 0) {
-    label.textContent = `All ${total} boxes`;
-    detail.textContent = 'Step through to see load order';
-  } else {
-    const p = _placements[n - 1];
-    label.textContent = `Load ${n} of ${total}`;
-    detail.textContent = `→ stop ${p.stop_index + 1}, position (${Math.round(p.x_cm)}, ${Math.round(p.y_cm)}, ${Math.round(p.z_cm)}) cm`;
+  if (_stepIndex === 0) {
+    label.textContent = `All ${_steps.length} steps`;
+    detail.textContent = 'Press Next to load set by set';
+    return;
   }
+  const s = _steps[_stepIndex - 1];
+  label.textContent = `Step ${_stepIndex} of ${_steps.length}`;
+  detail.textContent = `Load ${s.orders.length}× ${s.product_name} → stop ${s.stop_index + 1}`;
+}
+
+// eased drop-in tween, processed each frame by the render loop
+function stepAnimations() {
+  if (!_anims.length) return;
+  const now = performance.now();
+  _anims = _anims.filter((a) => {
+    const t = (now - a.start) / a.dur;
+    if (t <= 0) { a.mesh.position.y = a.fromY; return true; }
+    if (t >= 1) { a.mesh.position.y = a.toY; return false; }
+    const e = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    a.mesh.position.y = a.fromY + (a.toY - a.fromY) * e;
+    return true;
+  });
 }
 
 function currentTruckDims() {
