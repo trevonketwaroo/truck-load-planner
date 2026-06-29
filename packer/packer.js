@@ -218,8 +218,10 @@ function applyDoorSequencing(placements, truck) {
   const hasSideDoor = doorX !== null && doorX !== undefined && Number.isFinite(Number(doorX));
 
   if (!hasSideDoor) {
-    // Rear-doors-only truck: behave exactly as before.
-    placements.sort((a, b) => (b.x_cm - a.x_cm) || (b.z_cm - a.z_cm) ||
+    // Rear-doors-only truck. Load bottom-up (lowest z first, so the boxes a stack
+    // rests on go in before it — no "load the top then pack underneath"), then
+    // deepest-first along x within a layer.
+    placements.sort((a, b) => (a.z_cm - b.z_cm) || (b.x_cm - a.x_cm) ||
       String(a.box_id).localeCompare(String(b.box_id)));
     placements.forEach((p) => { p.load_via = 'rear'; });
     placements.forEach((p, i) => { p.load_order = i + 1; });
@@ -236,9 +238,11 @@ function applyDoorSequencing(placements, truck) {
     p.load_via = xCenter >= dx ? 'side' : 'rear';
   }
 
-  // Side group loads first, then rear group. Inside each group keep the
-  // existing deepest-first order so positions/LIFO-by-stop are untouched.
-  const byBuildOrder = (a, b) => (b.x_cm - a.x_cm) || (b.z_cm - a.z_cm) ||
+  // The side-door group loads FIRST (you load through the side door, then close
+  // it and load the rear). Within each group, load bottom-up (lowest z first so
+  // supports go in before stacked boxes — no floating rows loaded before what
+  // holds them), then deepest-first along x within a layer.
+  const byBuildOrder = (a, b) => (a.z_cm - b.z_cm) || (b.x_cm - a.x_cm) ||
     String(a.box_id).localeCompare(String(b.box_id));
   const side = placements.filter((p) => p.load_via === 'side').sort(byBuildOrder);
   const rear = placements.filter((p) => p.load_via === 'rear').sort(byBuildOrder);

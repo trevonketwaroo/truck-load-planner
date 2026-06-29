@@ -287,45 +287,42 @@ function renderBlueprint(result) {
   })();
 }
 
-// Draw door markers so the crew can orient the load. The left wall is at z=0
-// (truck width maps to three's z axis); the rear is the far x wall (x=length,
-// where the load is anchored). The side door — when present — is a green panel
-// on the left wall at its x position; the two rear doors are amber panels on
-// the rear wall. Rear-doors-only trucks show just the rear doors.
+// Draw door markers so the crew can orient the load. In the packer frame x=0 is
+// the REAR wall (where the two back doors are) and x=length is the CAB/front wall
+// (the load anchors against it). The left wall is the z=0 plane. The side door is
+// ONE rectangular green panel on the left wall near the cab; the rear doors are
+// two amber panels that interlock at the centre (no gap) on the rear wall.
 function addDoorMarkers(scene, truck) {
   const doorH = Math.min(truck.height * 0.8, truck.height - 4);
   const yCenter = doorH / 2 + 2;
 
-  // Side door on the left wall (z = 0 plane).
+  // Side door: one rectangle on the left wall (z=0). side_door_x_cm is measured
+  // from the cab, so in packer x (from the rear) it sits at length - side_door_x_cm.
   if (truck.side_door_x_cm !== null && truck.side_door_x_cm !== undefined) {
-    const dx = Math.max(0, Math.min(truck.length, truck.side_door_x_cm));
-    const doorLen = Math.min(truck.length * 0.28, 140);
-    const x0 = Math.max(0, Math.min(truck.length - doorLen, dx - doorLen / 2));
+    const packerDoorX = Math.max(0, Math.min(truck.length,
+      truck.length - Number(truck.side_door_x_cm)));
+    const doorLen = Math.min(truck.length * 0.3, 160);
+    const x0 = Math.max(0, Math.min(truck.length - doorLen, packerDoorX - doorLen / 2));
     const geo = new THREE.PlaneGeometry(doorLen, doorH);
     const mat = new THREE.MeshBasicMaterial({ color: 0x1d9e75, transparent: true,
-      opacity: 0.35, side: THREE.DoubleSide });
+      opacity: 0.4, side: THREE.DoubleSide });
     const panel = new THREE.Mesh(geo, mat);
     panel.position.set(x0 + doorLen / 2, yCenter, 0);
     panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
       new THREE.LineBasicMaterial({ color: 0x0f6e50 })));
     scene.add(panel);
-    // a vertical tick at the exact door split x
-    const tickGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(dx, 0, 0), new THREE.Vector3(dx, truck.height, 0)]);
-    scene.add(new THREE.Line(tickGeo, new THREE.LineBasicMaterial({ color: 0x0f6e50 })));
   }
 
-  // Two rear doors on the far x wall (x = length plane).
+  // Rear doors: two interlocking panels on the rear wall (x=0), meeting at the
+  // centre with no gap between them.
   const halfW = truck.width / 2;
   for (let i = 0; i < 2; i++) {
-    const doorW = halfW * 0.82;
-    const zCenter = i === 0 ? halfW * 0.5 : halfW * 1.5;
-    const geo = new THREE.PlaneGeometry(doorW, doorH);
+    const geo = new THREE.PlaneGeometry(halfW, doorH);
     const mat = new THREE.MeshBasicMaterial({ color: 0xef9f27, transparent: true,
-      opacity: 0.3, side: THREE.DoubleSide });
+      opacity: 0.32, side: THREE.DoubleSide });
     const panel = new THREE.Mesh(geo, mat);
     panel.rotation.y = Math.PI / 2;
-    panel.position.set(truck.length, yCenter, zCenter);
+    panel.position.set(0, yCenter, i === 0 ? halfW / 2 : halfW * 1.5);
     panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
       new THREE.LineBasicMaterial({ color: 0xb8730f })));
     scene.add(panel);
