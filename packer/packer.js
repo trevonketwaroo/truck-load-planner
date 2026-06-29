@@ -226,10 +226,14 @@ function applyDoorSequencing(placements, truck) {
     return;
   }
 
-  const dx = Number(doorX);
+  // side_door_x_cm is measured from the cab/front wall; the packer's x runs from
+  // the rear (x=0) to the cab (x=length). Convert the door to packer x, then a box
+  // loads via the SIDE door when its footprint centre is on the cab-side of that
+  // line. A front side door therefore takes the deep/front goods in first.
+  const dx = truck.length - Number(doorX);
   for (const p of placements) {
     const xCenter = p.x_cm + p.length_cm / 2;
-    p.load_via = xCenter <= dx ? 'side' : 'rear';
+    p.load_via = xCenter >= dx ? 'side' : 'rear';
   }
 
   // Side group loads first, then rear group. Inside each group keep the

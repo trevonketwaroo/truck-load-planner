@@ -312,10 +312,11 @@ const SIDE_DOOR_INPUT = {
 
 test('side-door truck: boxes are tagged side vs rear by the door x split', () => {
   const r = pack(SIDE_DOOR_INPUT);
-  // tagging rule: footprint centre on the cab-side of the door => side, else rear
+  // door is 300cm from the cab; in packer x (from the rear) that's 600-300=300.
+  // cab-side (x_center >= 300) loads via the side door, else rear.
   for (const p of r.placements) {
     const xc = p.x_cm + p.length_cm / 2;
-    assert.equal(p.load_via, xc <= 300 ? 'side' : 'rear');
+    assert.equal(p.load_via, xc >= 300 ? 'side' : 'rear');
   }
   // both doors are actually used in this layout
   assert.ok(r.placements.some((p) => p.load_via === 'side'));
@@ -371,10 +372,12 @@ test('applyDoorSequencing: rear-only path tags all rear, side path splits at x',
   const a = [mk('a', 0, 100), mk('b', 200, 100)];
   applyDoorSequencing(a, { length: 600, side_door_x_cm: null });
   assert.ok(a.every((p) => p.load_via === 'rear'));
-  // Side door at x=150: centre 50 -> side, centre 250 -> rear
-  const b = [mk('a', 0, 100), mk('b', 200, 100)];
+  // Side door 150cm from the cab -> packer x = 600-150 = 450. A box near the cab
+  // (centre 550 >= 450) loads via the side door; a box near the rear (centre 50)
+  // loads via the rear, and the side box loads first.
+  const b = [mk('rear', 0, 100), mk('cab', 500, 100)];
   applyDoorSequencing(b, { length: 600, side_door_x_cm: 150 });
-  assert.equal(b.find((p) => p.box_id === 'a').load_via, 'side');
-  assert.equal(b.find((p) => p.box_id === 'b').load_via, 'rear');
-  assert.ok(b.find((p) => p.box_id === 'a').load_order < b.find((p) => p.box_id === 'b').load_order);
+  assert.equal(b.find((p) => p.box_id === 'cab').load_via, 'side');
+  assert.equal(b.find((p) => p.box_id === 'rear').load_via, 'rear');
+  assert.ok(b.find((p) => p.box_id === 'cab').load_order < b.find((p) => p.box_id === 'rear').load_order);
 });
