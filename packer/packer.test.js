@@ -268,3 +268,113 @@ test('applyGravity drops a floating box to the floor', () => {
 });
 
 const { applyGravity } = require("./packer");
+
+// ===== Two-door loading model (side door first, then rear doors) =====
+const { applyDoorSequencing } = require('./packer');
+
+test('rear-only truck (no side door) is unchanged: all rear, deepest loads first', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 5000 },
+    stops: [{ sequence_index: 0 }, { sequence_index: 1 }],
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 3,
+        length_cm: 60, width_cm: 60, height_cm: 60, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 1, quantity: 3,
+        length_cm: 60, width_cm: 60, height_cm: 60, weight_kg: 10 },
+    ],
+    preset: 'balanced',
+  };
+  const r = pack(input);
+  // every placement loads via the rear, and load_order is dense 1..N
+  assert.ok(r.placements.every((p) => p.load_via === 'rear'));
+  const orders = r.placements.map((p) => p.load_order).sort((a, b) => a - b);
+  assert.deepEqual(orders, r.placements.map((_, i) => i + 1));
+  // deepest (largest x) still loads first
+  const first = r.placements.find((p) => p.load_order === 1);
+  const last = r.placements.find((p) => p.load_order === r.placements.length);
+  assert.ok(first.x_cm >= last.x_cm);
+});
+
+// Tall full-width boxes so the load fills the whole length and straddles the
+// door split (x from 0 to 600), populating both door groups.
+const SIDE_DOOR_INPUT = {
+  truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 50000,
+    side_door_x_cm: 300 },
+  stops: [{ sequence_index: 0 }, { sequence_index: 1 }],
+  items: [
+    { id: 1, product_id: 1, stop_index: 0, quantity: 8,
+      length_cm: 100, width_cm: 120, height_cm: 240, weight_kg: 10 },
+    { id: 2, product_id: 2, stop_index: 1, quantity: 8,
+      length_cm: 100, width_cm: 120, height_cm: 240, weight_kg: 10 },
+  ],
+  preset: 'balanced',
+};
+
+test('side-door truck: boxes are tagged side vs rear by the door x split', () => {
+  const r = pack(SIDE_DOOR_INPUT);
+  // tagging rule: footprint centre on the cab-side of the door => side, else rear
+  for (const p of r.placements) {
+    const xc = p.x_cm + p.length_cm / 2;
+    assert.equal(p.load_via, xc <= 300 ? 'side' : 'rear');
+  }
+  // both doors are actually used in this layout
+  assert.ok(r.placements.some((p) => p.load_via === 'side'));
+  assert.ok(r.placements.some((p) => p.load_via === 'rear'));
+});
+
+test('side-door truck: every side-door box loads before every rear-door box', () => {
+  const r = pack(SIDE_DOOR_INPUT);
+  const maxSideOrder = Math.max(...r.placements.filter((p) => p.load_via === 'side').map((p) => p.load_order));
+  const minRearOrder = Math.min(...r.placements.filter((p) => p.load_via === 'rear').map((p) => p.load_order));
+  assert.ok(maxSideOrder < minRearOrder,
+    'all side-door boxes must have a lower load_order than any rear-door box');
+  // load_order is still a dense 1..N permutation
+  const orders = r.placements.map((p) => p.load_order).sort((a, b) => a - b);
+  assert.deepEqual(orders, r.placements.map((_, i) => i + 1));
+});
+
+test('side door preserves hard constraints: no overlap, in bounds, deterministic', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 5000,
+      side_door_x_cm: 300 },
+    stops: [{ sequence_index: 0 }, { sequence_index: 1 }],
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 6,
+        length_cm: 80, width_cm: 60, height_cm: 50, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 1, quantity: 6,
+        length_cm: 80, width_cm: 60, height_cm: 50, weight_kg: 10 },
+    ],
+    preset: 'balanced',
+  };
+  const r1 = pack(input);
+  const r2 = pack(input);
+  assert.deepEqual(r1, r2); // deterministic
+  const ps = r1.placements;
+  const overlap3d = (a, b) =>
+    a.x_cm < b.x_cm + b.length_cm && a.x_cm + a.length_cm > b.x_cm &&
+    a.y_cm < b.y_cm + b.width_cm && a.y_cm + a.width_cm > b.y_cm &&
+    a.z_cm < b.z_cm + b.height_cm && a.z_cm + a.height_cm > b.z_cm;
+  for (const p of ps) {
+    assert.ok(p.x_cm >= 0 && p.x_cm + p.length_cm <= 600);
+    assert.ok(p.y_cm >= 0 && p.y_cm + p.width_cm <= 240);
+    assert.ok(p.z_cm >= 0 && p.z_cm + p.height_cm <= 240);
+  }
+  for (let i = 0; i < ps.length; i++)
+    for (let j = i + 1; j < ps.length; j++)
+      assert.ok(!overlap3d(ps[i], ps[j]), `overlap ${ps[i].box_id} / ${ps[j].box_id}`);
+});
+
+test('applyDoorSequencing: rear-only path tags all rear, side path splits at x', () => {
+  const mk = (id, x, len) => ({ box_id: id, x_cm: x, y_cm: 0, z_cm: 0,
+    length_cm: len, width_cm: 50, height_cm: 50 });
+  // No side door -> all rear
+  const a = [mk('a', 0, 100), mk('b', 200, 100)];
+  applyDoorSequencing(a, { length: 600, side_door_x_cm: null });
+  assert.ok(a.every((p) => p.load_via === 'rear'));
+  // Side door at x=150: centre 50 -> side, centre 250 -> rear
+  const b = [mk('a', 0, 100), mk('b', 200, 100)];
+  applyDoorSequencing(b, { length: 600, side_door_x_cm: 150 });
+  assert.equal(b.find((p) => p.box_id === 'a').load_via, 'side');
+  assert.equal(b.find((p) => p.box_id === 'b').load_via, 'rear');
+  assert.ok(b.find((p) => p.box_id === 'a').load_order < b.find((p) => p.box_id === 'b').load_order);
+});
