@@ -210,12 +210,67 @@ function anchorToCab(placements, truck) {
   if (shift > 0) for (const p of placements) p.x_cm += shift;
 }
 
+// Door-aware sequencing for a truck with a left-side door (loaded first) plus
+// rear doors (loaded second). This is the Phase-1 two-door model: it does NOT
+// move box positions (that stays conservative), it only TAGS each placement
+// with `load_via` and ORDERS `load_order` so the side-door group loads before
+// the rear-door group, while LIFO-by-stop is preserved within each door group.
+//
+// Rule (simple + documented): a box loads via the SIDE door when the centre of
+// its footprint sits on the cab-side of `side_door_x_cm` (x_center <= door x);
+// otherwise it loads via the REAR. Boxes are reachable from the side door while
+// it is open, so they go in first; the rear group fills the back afterwards.
+//
+// Within each door group the load order is the existing rule (deepest first:
+// largest x, then highest z, then box_id) so the relative build order — and the
+// per-stop LIFO that placeBoxes already encodes along x — is unchanged.
+function applyDoorSequencing(placements, truck) {
+  const doorX = truck.side_door_x_cm;
+  const hasSideDoor = doorX !== null && doorX !== undefined && Number.isFinite(Number(doorX));
+
+  if (!hasSideDoor) {
+    // Rear-doors-only truck. Load bottom-up (lowest z first, so the boxes a stack
+    // rests on go in before it — no "load the top then pack underneath"), then
+    // deepest-first along x within a layer.
+    placements.sort((a, b) => (a.z_cm - b.z_cm) || (b.x_cm - a.x_cm) ||
+      String(a.box_id).localeCompare(String(b.box_id)));
+    placements.forEach((p) => { p.load_via = 'rear'; });
+    placements.forEach((p, i) => { p.load_order = i + 1; });
+    return;
+  }
+
+  // side_door_x_cm is measured from the cab/front wall; the packer's x runs from
+  // the rear (x=0) to the cab (x=length). Convert the door to packer x, then a box
+  // loads via the SIDE door when its footprint centre is on the cab-side of that
+  // line. A front side door therefore takes the deep/front goods in first.
+  const dx = truck.length - Number(doorX);
+  for (const p of placements) {
+    const xCenter = p.x_cm + p.length_cm / 2;
+    p.load_via = xCenter >= dx ? 'side' : 'rear';
+  }
+
+  // The side-door group loads FIRST (you load through the side door, then close
+  // it and load the rear). Within each group, load bottom-up (lowest z first so
+  // supports go in before stacked boxes — no floating rows loaded before what
+  // holds them), then deepest-first along x within a layer.
+  const byBuildOrder = (a, b) => (a.z_cm - b.z_cm) || (b.x_cm - a.x_cm) ||
+    String(a.box_id).localeCompare(String(b.box_id));
+  const side = placements.filter((p) => p.load_via === 'side').sort(byBuildOrder);
+  const rear = placements.filter((p) => p.load_via === 'rear').sort(byBuildOrder);
+
+  placements.length = 0;
+  placements.push(...side, ...rear);
+  placements.forEach((p, i) => { p.load_order = i + 1; });
+}
+
 function pack(input) {
   const truck = {
     length: Number(input.truck.length_cm),
     width: Number(input.truck.width_cm),
     height: Number(input.truck.height_cm),
     max_payload: Number(input.truck.max_payload_kg),
+    side_door_x_cm: (input.truck.side_door_x_cm === null || input.truck.side_door_x_cm === undefined)
+      ? null : Number(input.truck.side_door_x_cm),
   };
   const { boxes, unplaced } = expandBoxes(input.items ?? []);
   const { kept, dropped } = enforceWeightCap(boxes, truck.max_payload);
@@ -224,13 +279,12 @@ function pack(input) {
   applyGravity(placements);       // no floating boxes
   anchorToCab(placements, truck); // load flush against the front wall
 
-  // load order: deepest (largest x), then highest z, loads first
-  placements.sort((a, b) => (b.x_cm - a.x_cm) || (b.z_cm - a.z_cm) ||
-    String(a.box_id).localeCompare(String(b.box_id)));
-  placements.forEach((p, i) => { p.load_order = i + 1; });
+  // load order + load_via: door-aware when the truck has a side door, else
+  // the original deepest-first single-opening order.
+  applyDoorSequencing(placements, truck);
 
   const stats = computeStats(placements, kept, truck);
   return { placements, stats, unplaced: [...unplaced, ...dropped, ...noFit] };
 }
 
-module.exports = { pack, expandBoxes, placeBoxes, computeStats, enforceWeightCap, applyGravity, anchorToCab, footprintOverlap, round2 };
+module.exports = { pack, expandBoxes, placeBoxes, computeStats, enforceWeightCap, applyGravity, anchorToCab, applyDoorSequencing, footprintOverlap, round2 };

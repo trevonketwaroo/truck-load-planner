@@ -15,23 +15,27 @@ module.exports = function loadPlannerRoutes(pool) {
 
   router.post('/trucks', async (req, res) => {
     try {
-      const { name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg } = req.body;
+      const { name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, side_door_x_cm } = req.body;
       if (!name) return res.status(400).json({ error: 'Name is required' });
+      const sideDoor = (side_door_x_cm === '' || side_door_x_cm === undefined || side_door_x_cm === null)
+        ? null : side_door_x_cm;
       const r = await pool.query(
-        `INSERT INTO trucks (name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg]);
+        `INSERT INTO trucks (name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, side_door_x_cm)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, sideDoor]);
       res.status(201).json(r.rows[0]);
     } catch { res.status(500).json({ error: 'Failed to create truck' }); }
   });
 
   router.put('/trucks/:id', async (req, res) => {
     try {
-      const { name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg } = req.body;
+      const { name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, side_door_x_cm } = req.body;
+      const sideDoor = (side_door_x_cm === '' || side_door_x_cm === undefined)
+        ? null : side_door_x_cm;
       const r = await pool.query(
         `UPDATE trucks SET name=$1, cargo_length_cm=$2, cargo_width_cm=$3,
-         cargo_height_cm=$4, max_payload_kg=$5 WHERE id=$6 RETURNING *`,
-        [name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, req.params.id]);
+         cargo_height_cm=$4, max_payload_kg=$5, side_door_x_cm=$6 WHERE id=$7 RETURNING *`,
+        [name, cargo_length_cm, cargo_width_cm, cargo_height_cm, max_payload_kg, sideDoor, req.params.id]);
       if (!r.rows[0]) return res.status(404).json({ error: 'Truck not found' });
       res.json(r.rows[0]);
     } catch { res.status(500).json({ error: 'Failed to update truck' }); }
@@ -181,6 +185,7 @@ module.exports = function loadPlannerRoutes(pool) {
           width_cm: Number(truck.rows[0].cargo_width_cm),
           height_cm: Number(truck.rows[0].cargo_height_cm),
           max_payload_kg: Number(truck.rows[0].max_payload_kg),
+          side_door_x_cm: truck.rows[0].side_door_x_cm === null ? null : Number(truck.rows[0].side_door_x_cm),
         },
         items: validRows.map((it) => ({
           id: it.id,

@@ -117,3 +117,16 @@ orientations fit within truck bounds and `top_only` sacks are excluded. The box'
 needs careful LIFO analysis). (2) Heightmap approach: instead of uniform layerHeight, track
 actual available z at each (x,y) position so shorter rows don't block taller stacking.
 (3) Confirm real two-door geometry and fix the side/rear reachability rule from PR #1.
+=======
+### 2026-06-29 — two-door rule fix + real geometry (PR #1 update)
+**Input from Trevon:** the main truck's left side door is **near the FRONT (cab end)**.
+**Fix:** found a coordinate-origin bug — `side_door_x_cm` is measured from the cab, but the
+packer's x runs from the rear, so the old rule compared mismatched origins. Corrected
+`applyDoorSequencing` to convert (`dx = length - side_door_x_cm`) and tag cab-side boxes
+(`x_center >= dx`) as side-door. Now a front door correctly loads the front/deep goods first.
+Tests updated to the from-cab convention; 23 passing. **Open question (need from Trevon):**
+how far in can the crew *reach* through the side door? The side zone currently = everything
+cab-side of the door line, so a small front-only load tags all-side and the split into both
+doors only appears once the load runs deeper than the door. Knowing the reach distance lets us
+define the side-door *zone depth* properly. **Next:** (1) get door reach → zone depth.
+(2) Place side-zone boxes in their own band so the side door physically fills first.

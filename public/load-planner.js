@@ -25,6 +25,8 @@ document.getElementById('add-truck').onclick = async () => {
     cargo_width_cm: +document.getElementById('t-w').value,
     cargo_height_cm: +document.getElementById('t-h').value,
     max_payload_kg: +document.getElementById('t-max').value,
+    side_door_x_cm: document.getElementById('t-side-door').value === ''
+      ? null : +document.getElementById('t-side-door').value,
   };
   await api('/trucks', { method: 'POST', body: JSON.stringify(body) });
   await loadTrucks();
@@ -173,21 +175,46 @@ function showResult(result) {
     ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}
     ${result.unplaced.length ? `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>` : ''}`;
 
-  // Load order as a human list: group boxes into sets (same product + stop) in
-  // load order. "Load 14× Milk for stop 1", etc. — what the crew actually needs.
+  // Load order as a human list: group boxes into sets (same door + product + stop)
+  // in load order. "Load 14× Milk for stop 1", etc. — what the crew needs.
+  // The load sheet is grouped by DOOR first (side door loaded first, then rear),
+  // then by load order within each door group.
   const sorted = [...result.placements].sort((a, b) => a.load_order - b.load_order);
-  const loadSteps = [];
-  let cur = null;
-  for (const p of sorted) {
-    const key = `${p.product_name || 'Goods'}|${p.stop_index}`;
-    if (!cur || cur.key !== key) {
-      cur = { key, name: p.product_name || 'Goods', stop: p.stop_index, n: 0 };
-      loadSteps.push(cur);
+  const hasSide = sorted.some((p) => p.load_via === 'side');
+  const buildSets = (rows) => {
+    const sets = [];
+    let cur = null;
+    for (const p of rows) {
+      const key = `${p.product_name || 'Goods'}|${p.stop_index}`;
+      if (!cur || cur.key !== key) {
+        cur = { key, name: p.product_name || 'Goods', stop: p.stop_index, n: 0 };
+        sets.push(cur);
+      }
+      cur.n++;
     }
-    cur.n++;
+    return sets;
+  };
+  const setsTable = (sets) =>
+    `<table class="loadsheet-table"><thead><tr><th>#</th><th>Load</th><th>For</th></tr></thead><tbody>${
+      sets.map((s, i) =>
+        `<tr><td>${i + 1}</td><td><strong>${s.n}×</strong> ${esc(s.name)}</td><td>Stop ${s.stop + 1}</td></tr>`
+      ).join('')}</tbody></table>`;
+
+  let loadSheetHtml;
+  if (hasSide) {
+    const sideSets = buildSets(sorted.filter((p) => p.load_via === 'side'));
+    const rearSets = buildSets(sorted.filter((p) => p.load_via === 'rear'));
+    loadSheetHtml =
+      `<h3>Load in this order (first item goes deepest)</h3>
+       <h4>1. Through the <span class="door-tag door-side">SIDE door</span> (loaded first, then close it)</h4>
+       ${sideSets.length ? setsTable(sideSets) : '<p class="muted">Nothing loads through the side door.</p>'}
+       <h4>2. Through the <span class="door-tag door-rear">REAR doors</span></h4>
+       ${rearSets.length ? setsTable(rearSets) : '<p class="muted">Nothing loads through the rear doors.</p>'}`;
+  } else {
+    loadSheetHtml =
+      `<h3>Load in this order (first item goes deepest)</h3>
+       ${setsTable(buildSets(sorted))}`;
   }
-  const loadRows = loadSteps.map((s, i) =>
-    `<tr><td>${i + 1}</td><td><strong>${s.n}×</strong> ${esc(s.name)}</td><td>Stop ${s.stop + 1}</td></tr>`).join('');
 
   // Per-stop unload view (what comes off at each stop)
   const stopsSet = [...new Set(result.placements.map((p) => p.stop_index))].sort((a, b) => a - b);
@@ -196,9 +223,7 @@ function showResult(result) {
     return `<h4>Stop ${si + 1} — ${count} item(s) come off</h4>`;
   }).join('');
   document.getElementById('loadsheet').innerHTML =
-    `<h3>Load in this order (first item goes deepest)</h3>
-     <table class="loadsheet-table"><thead><tr><th>#</th><th>Load</th><th>For</th></tr></thead><tbody>${loadRows}</tbody></table>
-     <h3>Unload order</h3>${unloadView}`;
+    `${loadSheetHtml}<h3>Unload order</h3>${unloadView}`;
 
   renderBlueprint(result);
 }
@@ -228,6 +253,8 @@ function renderBlueprint(result) {
     new THREE.EdgesGeometry(truckGeo), new THREE.LineBasicMaterial({ color: 0x888888 }));
   truckEdges.position.set(truck.length / 2, truck.height / 2, truck.width / 2);
   scene.add(truckEdges);
+
+  addDoorMarkers(scene, truck);
 
   _truckH = truck.height;
   _boxMeshes = [];
@@ -260,6 +287,48 @@ function renderBlueprint(result) {
   })();
 }
 
+// Draw door markers so the crew can orient the load. In the packer frame x=0 is
+// the REAR wall (where the two back doors are) and x=length is the CAB/front wall
+// (the load anchors against it). The left wall is the z=0 plane. The side door is
+// ONE rectangular green panel on the left wall near the cab; the rear doors are
+// two amber panels that interlock at the centre (no gap) on the rear wall.
+function addDoorMarkers(scene, truck) {
+  const doorH = Math.min(truck.height * 0.8, truck.height - 4);
+  const yCenter = doorH / 2 + 2;
+
+  // Side door: one rectangle on the left wall (z=0). side_door_x_cm is measured
+  // from the cab, so in packer x (from the rear) it sits at length - side_door_x_cm.
+  if (truck.side_door_x_cm !== null && truck.side_door_x_cm !== undefined) {
+    const packerDoorX = Math.max(0, Math.min(truck.length,
+      truck.length - Number(truck.side_door_x_cm)));
+    const doorLen = Math.min(truck.length * 0.3, 160);
+    const x0 = Math.max(0, Math.min(truck.length - doorLen, packerDoorX - doorLen / 2));
+    const geo = new THREE.PlaneGeometry(doorLen, doorH);
+    const mat = new THREE.MeshBasicMaterial({ color: 0x1d9e75, transparent: true,
+      opacity: 0.4, side: THREE.DoubleSide });
+    const panel = new THREE.Mesh(geo, mat);
+    panel.position.set(x0 + doorLen / 2, yCenter, 0);
+    panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+      new THREE.LineBasicMaterial({ color: 0x0f6e50 })));
+    scene.add(panel);
+  }
+
+  // Rear doors: two interlocking panels on the rear wall (x=0), meeting at the
+  // centre with no gap between them.
+  const halfW = truck.width / 2;
+  for (let i = 0; i < 2; i++) {
+    const geo = new THREE.PlaneGeometry(halfW, doorH);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xef9f27, transparent: true,
+      opacity: 0.32, side: THREE.DoubleSide });
+    const panel = new THREE.Mesh(geo, mat);
+    panel.rotation.y = Math.PI / 2;
+    panel.position.set(0, yCenter, i === 0 ? halfW / 2 : halfW * 1.5);
+    panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
+      new THREE.LineBasicMaterial({ color: 0xb8730f })));
+    scene.add(panel);
+  }
+}
+
 // Group placements into "load steps": a run of same product going to the same stop,
 // in load order. Each step is one set of goods the crew loads together.
 function setupWalkthrough(placements) {
@@ -267,9 +336,12 @@ function setupWalkthrough(placements) {
   _steps = [];
   let cur = null;
   for (const p of _placements) {
-    const key = `${p.product_name}|${p.stop_index}`;
+    // Break a step on door change too, so the walkthrough goes door-by-door:
+    // all SIDE-door sets first, then all REAR-door sets.
+    const via = p.load_via || 'rear';
+    const key = `${via}|${p.product_name}|${p.stop_index}`;
     if (!cur || cur.key !== key) {
-      cur = { key, product_name: p.product_name || 'Goods', stop_index: p.stop_index, orders: [] };
+      cur = { key, via, product_name: p.product_name || 'Goods', stop_index: p.stop_index, orders: [] };
       _steps.push(cur);
     }
     cur.orders.push(p.load_order);
@@ -323,8 +395,9 @@ function updateStepLabel() {
     return;
   }
   const s = _steps[_stepIndex - 1];
+  const doorLabel = s.via === 'side' ? 'SIDE door' : 'REAR doors';
   label.textContent = `Step ${_stepIndex} of ${_steps.length}`;
-  detail.textContent = `Load ${s.orders.length}× ${s.product_name} → stop ${s.stop_index + 1}`;
+  detail.textContent = `Through the ${doorLabel}: load ${s.orders.length}× ${s.product_name} → stop ${s.stop_index + 1}`;
 }
 
 // eased drop-in tween, processed each frame by the render loop
@@ -344,7 +417,9 @@ function stepAnimations() {
 function currentTruckDims() {
   const id = +document.getElementById('truck-select').value;
   const t = (state.trucks || []).find((x) => x.id === id);
+  const sideDoor = (t && t.side_door_x_cm !== null && t.side_door_x_cm !== undefined && t.side_door_x_cm !== '')
+    ? +t.side_door_x_cm : null;
   return t
-    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm }
-    : { length: 600, width: 240, height: 240 };
+    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm, side_door_x_cm: sideDoor }
+    : { length: 600, width: 240, height: 240, side_door_x_cm: null };
 }
