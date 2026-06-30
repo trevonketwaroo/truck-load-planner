@@ -172,6 +172,44 @@ test('top_only box sits on top of regular boxes without overlap', () => {
         `overlap ${placements[i].box_id} / ${placements[j].box_id}`);
 });
 
+test('top_only sacks rest on their own stop band, not the global door end', () => {
+  // stop 0 has a regular box that occupies x:[0,100). stop 1 has ONLY sacks
+  // (no regular boxes of its own). The sacks must band in after stop 0's
+  // footprint, not fall back to x=0 (the door end / global start).
+  const boxes = [
+    box('reg0', 0, 100, 100, 80, 10),
+    box('sack1', 1, 50, 50, 20, 5, { top_only: true }),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, truck, 'balanced');
+  assert.equal(unplaced.length, 0);
+  const sack = placements.find((p) => p.box_id === 'sack1');
+  assert.ok(sack.x_cm >= 100, 'sack must band in after stop 0, not bunch at x=0');
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      assert.ok(!overlaps(placements[i], placements[j]),
+        `overlap ${placements[i].box_id} / ${placements[j].box_id}`);
+});
+
+test('top_only sacks rest on their own stop surface, not the tallest stack elsewhere', () => {
+  // stop 0 has a TALL regular box (h=200). stop 1 has a SHORT regular box
+  // (h=30) plus a sack. The sack belongs to stop 1 and must rest on stop 1's
+  // own 30cm surface, not be pushed up to 200cm because of an unrelated
+  // tall stack in a different stop's band.
+  const boxes = [
+    box('tall0', 0, 100, 100, 200, 10),
+    box('short1', 1, 100, 100, 30, 10),
+    box('sack1', 1, 50, 50, 20, 5, { top_only: true }),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, truck, 'balanced');
+  assert.equal(unplaced.length, 0);
+  const sack = placements.find((p) => p.box_id === 'sack1');
+  assert.equal(sack.z_cm, 30, 'sack must rest on stop 1\'s own box, not the unrelated tall stack');
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      assert.ok(!overlaps(placements[i], placements[j]),
+        `overlap ${placements[i].box_id} / ${placements[j].box_id}`);
+});
+
 test('enforceWeightCap drops latest-stop/lightest first under cap', () => {
   const boxes = [
     box('a', 0, 40, 40, 40, 30),

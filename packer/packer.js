@@ -59,14 +59,21 @@ function sortForPreset(group, preset) {
 function placeBoxes(boxes, truck, preset) {
   const placements = [];
   const unplaced = [];
-  const regular = boxes.filter((b) => !b.top_only);
-  const tops = boxes.filter((b) => b.top_only);
-
-  const stops = [...new Set(regular.map((b) => b.stop_index))].sort((a, b) => a - b);
+  const regularByStop = new Map();
+  const topsByStop = new Map();
+  for (const b of boxes) {
+    const map = b.top_only ? topsByStop : regularByStop;
+    if (!map.has(b.stop_index)) map.set(b.stop_index, []);
+    map.get(b.stop_index).push(b);
+  }
+  const stops = [...new Set([...regularByStop.keys(), ...topsByStop.keys()])].sort((a, b) => a - b);
   let bandStartX = 0;
 
   for (const s of stops) {
-    const group = regular.filter((b) => b.stop_index === s);
+    const bandX0 = bandStartX;
+    let bandTop = 0; // tallest stack reached within this stop's own band
+
+    const group = regularByStop.get(s) || [];
     sortForPreset(group, preset);
     let x = bandStartX, y = 0, z = 0, rowDepth = 0, layerHeight = 0;
     for (const b of group) {
@@ -93,37 +100,35 @@ function placeBoxes(boxes, truck, preset) {
         x_cm: x, y_cm: y, z_cm: z,
         length_cm: b.l, width_cm: plW, height_cm: plH,
       });
+      bandTop = Math.max(bandTop, z + plH);
       y += plW;
       rowDepth = Math.max(rowDepth, b.l);
       layerHeight = Math.max(layerHeight, plH);
     }
     bandStartX = x + rowDepth;
+
+    // top_only / sacks: banded per stop, same as regular boxes, so each stop's
+    // sacks rest on that stop's own surface instead of bunching at the door end
+    // or perching on whatever the tallest stack anywhere else happens to be.
+    const tGroup = topsByStop.get(s) || [];
+    let tx = bandX0, ty = 0, tz = bandTop, tRowDepth = 0;
+    for (const b of tGroup) {
+      if (b.l > truck.length || b.w > truck.width) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
+      if (tz + b.h > truck.height) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
+      if (ty + b.w > truck.width) { ty = 0; tx += tRowDepth; tRowDepth = 0; }
+      if (tx + b.l > truck.length) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
+      placements.push({
+        box_id: b.id, stop_index: s,
+        x_cm: tx, y_cm: ty, z_cm: tz,
+        length_cm: b.l, width_cm: b.w, height_cm: b.h,
+      });
+      ty += b.w;
+      tRowDepth = Math.max(tRowDepth, b.l);
+    }
+    bandStartX = Math.max(bandStartX, tx + tRowDepth);
   }
 
-  // top_only / sacks: laid on top across the whole load, filling from the door end.
-  // NOTE (Phase 1): top items are NOT stop-banded — a late-stop sack may sit near the
-  // door physically. Its stop_index is still correct for coloring/load-order. Phase 2/3
-  // will band sacks per stop too.
-  let tx = 0, ty = 0, tz = topSurface(placements);
-  let tRowDepth = 0;
-  for (const b of tops) {
-    if (b.l > truck.length || b.w > truck.width) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    if (tz + b.h > truck.height) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    if (ty + b.w > truck.width) { ty = 0; tx += tRowDepth; tRowDepth = 0; }
-    if (tx + b.l > truck.length) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    placements.push({
-      box_id: b.id, stop_index: b.stop_index,
-      x_cm: tx, y_cm: ty, z_cm: tz,
-      length_cm: b.l, width_cm: b.w, height_cm: b.h,
-    });
-    ty += b.w;
-    tRowDepth = Math.max(tRowDepth, b.l);
-  }
   return { placements, unplaced };
-}
-
-function topSurface(placements) {
-  return placements.reduce((max, p) => Math.max(max, p.z_cm + p.height_cm), 0);
 }
 
 function computeStats(placements, boxes, truck) {
