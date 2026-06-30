@@ -91,6 +91,13 @@ async function runMigrations() {
     )
   `);
 
+  // Truck access model: optional left-side door. NULL = rear-doors-only truck.
+  // side_door_x_cm is the door's position along the cargo length (x, measured from
+  // the cab/front wall). Boxes on the cab-side of this x load through the side door
+  // first; the rest load through the rear doors. See packer/packer.js + the brief.
+  await pool.query(
+    `ALTER TABLE trucks ADD COLUMN IF NOT EXISTS side_door_x_cm DECIMAL(7,1)`);
+
   // trips table
   await pool.query(`
     CREATE TABLE IF NOT EXISTS trips (

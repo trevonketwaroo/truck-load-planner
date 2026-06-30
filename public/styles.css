@@ -456,6 +456,17 @@ details > .row { padding: 14px; }
   font-weight: 600;
   color: var(--text);
 }
+#loadsheet .muted { color: var(--text-muted); font-size: 13px; margin: 4px 0 10px; }
+.door-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.door-tag.door-side { background: rgba(29, 158, 117, 0.16); color: #0f6e50; }
+.door-tag.door-rear { background: rgba(239, 159, 39, 0.18); color: #b8730f; }
 #loadsheet table {
   width: 100%;
   border-collapse: collapse;
