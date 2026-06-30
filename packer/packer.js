@@ -81,18 +81,29 @@ function placeBoxes(boxes, truck, preset) {
         unplaced.push({ box_id: b.id, reason: 'no_space' });
         continue;
       }
-      if (y + b.w > truck.width) { y = 0; z += layerHeight; layerHeight = 0; }
-      if (z + b.h > truck.height) { z = 0; y = 0; x += rowDepth; rowDepth = 0; layerHeight = 0; }
+      // Choose orientation: prefer original; rotate 90° in the y-z plane (swap w↔h)
+      // when the original width would start a new row but the rotated width fits the
+      // current row. Both orientations must fit within truck bounds; top_only sacks
+      // are never rotated. Preserves the x footprint so LIFO is untouched.
+      // Approach: same as jerry800416/3D-bin-packing (MIT) but limited to one axis.
+      let plW = b.w, plH = b.h;
+      const canRotate = !b.top_only && b.h <= truck.width && b.w <= truck.height;
+      if (canRotate && y + b.w > truck.width && y + b.h <= truck.width && z + b.w <= truck.height) {
+        plW = b.h; plH = b.w;
+      }
+
+      if (y + plW > truck.width) { y = 0; z += layerHeight; layerHeight = 0; }
+      if (z + plH > truck.height) { z = 0; y = 0; x += rowDepth; rowDepth = 0; layerHeight = 0; }
       if (x + b.l > truck.length) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
       placements.push({
         box_id: b.id, stop_index: s,
         x_cm: x, y_cm: y, z_cm: z,
-        length_cm: b.l, width_cm: b.w, height_cm: b.h,
+        length_cm: b.l, width_cm: plW, height_cm: plH,
       });
-      bandTop = Math.max(bandTop, z + b.h);
-      y += b.w;
+      bandTop = Math.max(bandTop, z + plH);
+      y += plW;
       rowDepth = Math.max(rowDepth, b.l);
-      layerHeight = Math.max(layerHeight, b.h);
+      layerHeight = Math.max(layerHeight, plH);
     }
     bandStartX = x + rowDepth;
 
