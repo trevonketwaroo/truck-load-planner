@@ -269,6 +269,105 @@ test('applyGravity drops a floating box to the floor', () => {
 
 const { applyGravity } = require("./packer");
 
+// ── y-z rotation tests ──────────────────────────────────────────────────────
+
+test('rotation: wide-flat box rotates to fit current row instead of starting a new row', () => {
+  // Truck width=240. Box A fills y=0→160 (w=160). Box B (w=120, h=70) can't fit: 160+120=280>240.
+  // Rotated B: plW=70, plH=120. 160+70=230 ≤ 240 and z+120 ≤ 240 → rotation fires.
+  // Without rotation B would start at z=80 (new layer); with rotation B stays at z=0.
+  const smallTruck = { length: 600, width: 240, height: 240, max_payload: 2000 };
+  // volume(A)=640000 > volume(B)=420000, so A is placed first (balanced preset).
+  const boxes = [
+    box('a', 0, 50, 160, 80, 10),
+    box('b', 0, 50, 120, 70, 10),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, smallTruck, 'balanced');
+  assert.equal(unplaced.length, 0, 'both boxes must be placed');
+  const a = placements.find((p) => p.box_id === 'a');
+  const b = placements.find((p) => p.box_id === 'b');
+  assert.equal(a.z_cm, 0, 'box A on the floor');
+  assert.equal(b.z_cm, 0, 'box B stays in same row — rotation prevented a new layer');
+  assert.equal(b.width_cm, 70, 'rotated box B width = original height');
+  assert.equal(b.height_cm, 120, 'rotated box B height = original width');
+  // hard constraints: no overlap, in bounds
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      assert.ok(!overlaps(placements[i], placements[j]), 'rotated placement must not overlap');
+  assert.ok(b.y_cm + b.width_cm <= smallTruck.width, 'rotated box B stays within truck width');
+  assert.ok(b.z_cm + b.height_cm <= smallTruck.height, 'rotated box B stays within truck height');
+});
+
+test('rotation: top_only boxes are never rotated', () => {
+  // top_only boxes skip the rotation check — they must keep original w/h.
+  const t = { length: 600, width: 240, height: 240, max_payload: 2000 };
+  const boxes = [
+    box('reg', 0, 400, 160, 100, 10),
+    box('sack', 0, 50, 120, 40, 5, { top_only: true }),
+  ];
+  const { placements } = placeBoxes(boxes, t, 'balanced');
+  const sack = placements.find((p) => p.box_id === 'sack');
+  assert.ok(sack, 'top_only box must be placed');
+  assert.equal(sack.width_cm, 120, 'top_only box keeps original width — not rotated');
+  assert.equal(sack.height_cm, 40, 'top_only box keeps original height — not rotated');
+});
+
+test('rotation: box where b.w exceeds truck.height is not rotated — falls to next x-column', () => {
+  // canRotate requires b.w ≤ truck.height. Box B: b.w=100 > truck.height=80 → canRotate=false.
+  // Box A (w=140) fills y=0→140. Box B (w=100) can't fit row (240>200) and the z-layer
+  // (z=60+60=120>80), so it moves to the next x-column (z resets to 0). B uses original dims.
+  const lowTruck = { length: 600, width: 200, height: 80, max_payload: 2000 };
+  const boxes = [
+    box('a', 0, 50, 140, 60, 10),
+    box('b', 0, 50, 100, 60, 9),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, lowTruck, 'balanced');
+  assert.equal(unplaced.length, 0, 'both boxes must be placed');
+  const a = placements.find((p) => p.box_id === 'a');
+  const b = placements.find((p) => p.box_id === 'b');
+  assert.equal(b.width_cm, 100, 'B keeps original width when rotation is invalid');
+  assert.equal(b.height_cm, 60, 'B keeps original height when rotation is invalid');
+  // B couldn't fit in A's column at all — it lands in the next x-column (deeper in the truck)
+  assert.ok(b.x_cm > a.x_cm, 'B moves to a new x-column when rotation is blocked');
+});
+
+test('rotation: rotated boxes still satisfy no-float and in-bounds constraints', () => {
+  // Mixed bag of boxes where rotation will trigger for some; pack() applies gravity too.
+  const result = pack({
+    truck: { length_cm: 400, width_cm: 200, height_cm: 200, max_payload_kg: 5000 },
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 3,
+        length_cm: 50, width_cm: 160, height_cm: 60, weight_kg: 15 },
+      { id: 2, product_id: 2, stop_index: 0, quantity: 3,
+        length_cm: 50, width_cm: 100, height_cm: 80, weight_kg: 10 },
+    ],
+    preset: 'balanced',
+  });
+  assert.equal(result.unplaced.length, 0, 'all boxes placed');
+  for (const p of result.placements) {
+    assert.ok(p.x_cm >= 0 && p.x_cm + p.length_cm <= 400, `${p.box_id} x in bounds`);
+    assert.ok(p.y_cm >= 0 && p.y_cm + p.width_cm <= 200, `${p.box_id} y in bounds`);
+    assert.ok(p.z_cm >= 0 && p.z_cm + p.height_cm <= 200, `${p.box_id} z in bounds`);
+  }
+  const pairOverlap = (a, b) =>
+    a.x_cm < b.x_cm + b.length_cm && a.x_cm + a.length_cm > b.x_cm &&
+    a.y_cm < b.y_cm + b.width_cm  && a.y_cm + a.width_cm  > b.y_cm &&
+    a.z_cm < b.z_cm + b.height_cm && a.z_cm + a.height_cm > b.z_cm;
+  const ps = result.placements;
+  for (let i = 0; i < ps.length; i++)
+    for (let j = i + 1; j < ps.length; j++)
+      assert.ok(!pairOverlap(ps[i], ps[j]), `overlap: ${ps[i].box_id} / ${ps[j].box_id}`);
+  // no floating boxes
+  for (const b of ps) {
+    if (b.z_cm === 0) continue;
+    const fp = (a, c) =>
+      a.x_cm < c.x_cm + c.length_cm && a.x_cm + a.length_cm > c.x_cm &&
+      a.y_cm < c.y_cm + c.width_cm  && a.y_cm + a.width_cm  > c.y_cm;
+    const supported = ps.some((o) => o !== b && fp(b, o) &&
+      Math.abs((o.z_cm + o.height_cm) - b.z_cm) < 0.001);
+    assert.ok(supported, `box ${b.box_id} floats at z=${b.z_cm}`);
+  }
+});
+
 // ===== Two-door loading model (side door first, then rear doors) =====
 const { applyDoorSequencing } = require('./packer');
 

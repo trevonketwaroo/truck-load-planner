@@ -86,6 +86,38 @@ Shipped before this brief: stop-banded LIFO packer; `applyGravity` (no floating 
 stability, blueprint intuitiveness. **Next:** model the left-side-door + rear-doors loading
 sequence; research how commercial tools visualize and sequence multi-opening loads.
 
+### 2026-06-29 — two-door model foundation (PR #1)
+**Research:** Reviewed how EasyCargo and Goodloading handle multi-access loads; looked at
+how jerry800416/3D-bin-packing (https://github.com/jerry800416/3D-bin-packing) tags
+rotations and fix_point. **Change:** Added `trucks.side_door_x_cm` schema column; packer now
+calls `applyDoorSequencing()` which tags each placement `load_via: 'side'|'rear'` and orders
+side-door boxes first; UI shows a form field for the door position; 3D blueprint renders green
+side-door panel + amber rear-door panels; load sheet is grouped "Through the SIDE door →
+Through the REAR doors"; walkthrough step labels name the door. **Tests:** 23 passing (5 new).
+**Known gap:** side/rear split rule (`x_center <= side_door_x_cm`) interacts with cab-anchoring
+— on small loads everything lands near the cab and tags 'rear'. Real truck geometry needed.
+**Next (candidates):** (1) Confirm real side-door position + reach; refine split rule to
+reachability-based. (2) Actually place side-door boxes first in their own x-band. (3) Reflect
+the two-door order in the animation explicitly. PR #1 open for review.
+
+### 2026-06-29 — y-z plane box rotation for density (PR #2, this run)
+**Research:** Commercial bin-packers always allow box rotation; jerry800416/3D-bin-packing
+(https://github.com/jerry800416/3D-bin-packing) tries all 6 orientations. Strip Rotation and
+Compaction (SRC) heuristic (Gonçalves et al., https://www1.dem.ist.utl.pt/engopt2010/) shows
+density gains of 5-15% from rotation in practice. I-DBLF (Dube & Kaur, ResearchGate
+https://www.researchgate.net/publication/256936836) integrates rotation into the GA packing
+loop. **Change:** In `placeBoxes`, before starting a new row when a box's width is too wide,
+try rotating the box 90° in the y-z plane (swap `w↔h`). Rotation fires only when both
+orientations fit within truck bounds and `top_only` sacks are excluded. The box's x footprint
+(depth into truck) is unchanged, so LIFO-by-stop order is preserved. **Tests:** 22 passing
+(4 new: rotation saves row; top_only not rotated; canRotate guard; hard-constraint pass).
+**Live verify:** 15 boxes packed into a 20ft truck, 0 unplaced, all constraints passed
+(in-bounds, no overlaps, no floating, LIFO, cab-anchored). PR #2 open for review.
+**Next (candidates):** (1) Extend rotation to also try swapping l↔w (changes x footprint —
+needs careful LIFO analysis). (2) Heightmap approach: instead of uniform layerHeight, track
+actual available z at each (x,y) position so shorter rows don't block taller stacking.
+(3) Confirm real two-door geometry and fix the side/rear reachability rule from PR #1.
+=======
 ### 2026-06-29 — two-door rule fix + real geometry (PR #1 update)
 **Input from Trevon:** the main truck's left side door is **near the FRONT (cab end)**.
 **Fix:** found a coordinate-origin bug — `side_door_x_cm` is measured from the cab, but the
