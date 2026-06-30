@@ -236,7 +236,7 @@ function renderBlueprint(result) {
   const truck = currentTruckDims();
   const W = el.clientWidth, H = el.clientHeight;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
+  scene.background = new THREE.Color(0x0d141d);
   const camera = new THREE.PerspectiveCamera(45, W / H, 1, 100000);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   _threeRenderer = renderer;
@@ -250,7 +250,7 @@ function renderBlueprint(result) {
   // truck wireframe (x=length, y=height, z=width mapped to three's axes)
   const truckGeo = new THREE.BoxGeometry(truck.length, truck.height, truck.width);
   const truckEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(truckGeo), new THREE.LineBasicMaterial({ color: 0x888888 }));
+    new THREE.EdgesGeometry(truckGeo), new THREE.LineBasicMaterial({ color: 0x5a6b7d }));
   truckEdges.position.set(truck.length / 2, truck.height / 2, truck.width / 2);
   scene.add(truckEdges);
 
@@ -271,17 +271,70 @@ function renderBlueprint(result) {
   }
   setupWalkthrough(result.placements);
 
+  // --- Orbit camera via spherical coords around the truck centre ---
   const maxDim = Math.max(truck.length, truck.width, truck.height);
-  camera.position.set(truck.length * 1.4, truck.height * 1.6, truck.width * 2.2);
-  camera.lookAt(truck.length / 2, truck.height / 2, truck.width / 2);
+  const centre = new THREE.Vector3(truck.length / 2, truck.height / 2, truck.width / 2);
+  const radius = maxDim * 1.9; // matches the previous framing distance
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // Spherical: azimuth around Y, elevation from the horizontal plane.
+  let azimuth = 0;        // starts looking along +x/+z like the old orbit
+  let elevation = 0.8;    // a comfortable raised viewing angle
+  let userInteracted = false;
+  let dragging = false;
+  let startX = 0, startY = 0, startAz = 0, startEl = 0;
 
-  let angle = 0;
+  function applyCamera() {
+    const ce = Math.cos(elevation), se = Math.sin(elevation);
+    camera.position.set(
+      centre.x + radius * ce * Math.cos(azimuth),
+      centre.y + radius * se,
+      centre.z + radius * ce * Math.sin(azimuth));
+    camera.lookAt(centre);
+  }
+  applyCamera();
+
+  const canvas = renderer.domElement;
+  canvas.style.cursor = 'grab';
+  const badge = document.getElementById('viewer-badge');
+  if (badge) badge.classList.remove('is-hidden'); // fresh render → show the hint again
+
+  const onPointerDown = (e) => {
+    dragging = true;
+    if (!userInteracted) {
+      userInteracted = true; // stop auto-rotate on first interaction
+      if (badge) badge.classList.add('is-hidden');
+    }
+    startX = e.clientX; startY = e.clientY;
+    startAz = azimuth; startEl = elevation;
+    canvas.style.cursor = 'grabbing';
+    if (canvas.setPointerCapture && e.pointerId !== undefined) {
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+  };
+  const onPointerMove = (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    azimuth = startAz + dx * 0.005;
+    elevation = clamp(startEl - dy * 0.005, 0.15, 1.45);
+    applyCamera();
+  };
+  const stopDrag = () => {
+    dragging = false;
+    canvas.style.cursor = 'grab';
+  };
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', stopDrag);
+  canvas.addEventListener('pointerleave', stopDrag);
+  canvas.addEventListener('pointercancel', stopDrag);
+
   (function animate() {
     _animId = requestAnimationFrame(animate);
-    angle += 0.003;
-    camera.position.x = truck.length / 2 + Math.cos(angle) * maxDim * 1.8;
-    camera.position.z = truck.width / 2 + Math.sin(angle) * maxDim * 1.8;
-    camera.lookAt(truck.length / 2, truck.height / 2, truck.width / 2);
+    if (!userInteracted) {
+      azimuth += 0.003; // slow auto-rotate until the user takes control
+      applyCamera();
+    }
     stepAnimations();
     renderer.render(scene, camera);
   })();
