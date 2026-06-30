@@ -236,7 +236,7 @@ function renderBlueprint(result) {
   const truck = currentTruckDims();
   const W = el.clientWidth, H = el.clientHeight;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
+  scene.background = new THREE.Color(0x0d141d);
   const camera = new THREE.PerspectiveCamera(45, W / H, 1, 100000);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   _threeRenderer = renderer;
@@ -250,7 +250,7 @@ function renderBlueprint(result) {
   // truck wireframe (x=length, y=height, z=width mapped to three's axes)
   const truckGeo = new THREE.BoxGeometry(truck.length, truck.height, truck.width);
   const truckEdges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(truckGeo), new THREE.LineBasicMaterial({ color: 0x888888 }));
+    new THREE.EdgesGeometry(truckGeo), new THREE.LineBasicMaterial({ color: 0x5a6b7d }));
   truckEdges.position.set(truck.length / 2, truck.height / 2, truck.width / 2);
   scene.add(truckEdges);
 
