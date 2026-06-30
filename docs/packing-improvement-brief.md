@@ -98,3 +98,58 @@ cab-side of the door line, so a small front-only load tags all-side and the spli
 doors only appears once the load runs deeper than the door. Knowing the reach distance lets us
 define the side-door *zone depth* properly. **Next:** (1) get door reach → zone depth.
 (2) Place side-zone boxes in their own band so the side door physically fills first.
+
+### 2026-06-30 — top_only sacks banded per stop (stability/realism, item #3)
+**Context:** items #1 (two-door model) and #2 (density/rotation) both already had open PRs
+from 2026-06-29 awaiting review, so today's run advanced item #3 (stability/blueprint
+realism) instead, per the working agreement's "advance a different item" rule.
+
+**Research:** support-area/stability constraints in 3D bin packing are a well-studied
+extension of the basic gravity rule — a placed item's bottom contact area with item(s)
+beneath it must meet a minimum support ratio, not just touch a corner
+([support-ratio formalization, ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0305054825000334);
+[jerry800416/3D-bin-packing `fix_point`/`loadbear`](https://github.com/jerry800416/3D-bin-packing)
+solves the same "floating items" class of problem this codebase's `applyGravity` already
+handles for regular boxes). Looking at this codebase specifically, the floating-item rule
+was already solid for regular boxes, but `placeBoxes`' `top_only` (sack) loop was not
+stop-banded: it placed every sack starting from a single **global** `topSurface()` height
+(the tallest stack anywhere in the whole truck) and from the door-end x=0, regardless of
+which stop the sack belonged to (flagged as a known TODO in the code comment itself). In
+practice this meant a stop's sacks could be forced up onto an unrelated, much taller stack
+from a different stop, or end up bunched at the door rather than near their own stop's
+footprint — exactly the "top_only sacks should rest on a real surface near their stop, not
+bunch at the door" gap called out in priority item #3 above.
+
+**Change:** `packer/packer.js` `placeBoxes` now groups `top_only` boxes by `stop_index` (a
+`Map`, same shape as the existing regular-box grouping) and bands each stop's sacks into
+*that stop's own band*: they start at the stop's band's `x0` and rest on `bandTop` (the
+tallest *regular* stack within that specific stop's band), not a global value. `bandStartX`
+for the next stop now accounts for whichever of the regular or sack content extended
+further, so bands stay non-overlapping by construction — no reliance on `applyGravity` to
+paper over 2D placement mistakes. Removed the now-unused global `topSurface()` helper.
+`applyGravity`/`anchorToCab`/`applyDoorSequencing` are untouched.
+
+**Tests:** added 2 new tests — (1) a stop with *only* sacks (no regular boxes of its own)
+bands in after the prior stop's footprint instead of falling back to x=0; (2) a sack
+belonging to a stop with a short box rests on that short box's own height, not an unrelated
+tall box's height from a different stop. **25 packer tests pass** (23 prior + 2 new), no
+regressions.
+
+**Live verification (trip 21, 20ft truck id 2, side door at 100cm from cab):** stop A = one
+100×100×200 box; stop B = one 100×100×30 box + one 50×50×20 sack. Packed via the real API
+against the Postgres dev DB: stop B's box placed at `z=0`, stop B's sack placed at `z=30`
+directly on top of its own stop's box — **not** at `z=200` (stop A's unrelated tall box).
+No overlaps, all in-bounds, anchored to the cab wall (`maxX=600`). Verification trip/items
+deleted after the check; products left in place (`VERIFY tall0/short1/sack1 2026-06-30`,
+ids 117–119), matching the precedent left by the 2026-06-29 verification run.
+
+**Candidate next steps:**
+1. Generalize the "minimum support ratio" idea (research above) into `applyGravity` itself
+   for *regular* boxes too — currently a box can rest on a sliver of corner overlap and
+   still count as "supported"; require a real contact-area threshold (e.g. ≥60-75%) before
+   accepting a resting height, falling back to the next lower valid support otherwise.
+2. Resolve the open side-door reach-distance question from the 2026-06-29 entry, then make
+   `applyDoorSequencing`'s zone a real depth-bounded region instead of an x-threshold split.
+3. Heavy/large-low stability: today sort order already favors heavy+large first for the
+   `balanced`/`heavy_load` presets, but nothing stops a light box from being placed under a
+   much heavier one within the same band — add an explicit weight-bearing check per stack.
