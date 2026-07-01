@@ -164,16 +164,24 @@ let _threeRenderer = null, _animId = null;
 let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
 let _anims = [], _truckH = 240;
 
-function showResult(result) {
-  document.getElementById('result-section').style.display = 'block';
-  const s = result.stats;
+function renderStatsOnly(s) {
   document.getElementById('stats').innerHTML = `
     <span class="stat"><span class="stat-label">Space used</span><span class="stat-value">${s.volume_used_pct}%</span></span>
     <span class="stat"><span class="stat-label">Weight</span><span class="stat-value">${s.total_weight_kg}<span class="stat-unit"> / ${s.max_payload_kg} kg</span></span></span>
     <span class="stat"><span class="stat-label">Balance L / R</span><span class="stat-value">${s.balance_left_pct} / ${s.balance_right_pct}</span></span>
     <span class="stat"><span class="stat-label">Front / Rear</span><span class="stat-value">${s.balance_front_pct} / ${s.balance_rear_pct}</span></span>
-    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}
-    ${result.unplaced.length ? `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>` : ''}`;
+    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}`;
+}
+window.renderStatsOnly = renderStatsOnly;
+
+function showResult(result) {
+  document.getElementById('result-section').style.display = 'block';
+  const s = result.stats;
+  renderStatsOnly(s);
+  if (result.unplaced && result.unplaced.length) {
+    document.getElementById('stats').insertAdjacentHTML('beforeend',
+      `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>`);
+  }
 
   // Load order as a human list: group boxes into sets (same door + product + stop)
   // in load order. "Load 14× Milk for stop 1", etc. — what the crew needs.

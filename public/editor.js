@@ -93,10 +93,61 @@
   };
   Editor.onPointerUp = function () { dragging = false; dragBox = null; };
 
+  Editor._onLayoutChanged = function () {
+    const t = window._view.truck;
+    const truckVol = t.length * t.width * t.height;
+    let used = 0, wt = 0, mL = 0, mR = 0, mF = 0, mRe = 0;
+    for (const p of working) {
+      used += p.length_cm * p.width_cm * p.height_cm;
+      const w = Number(p.weight_kg) || 0; wt += w;
+      (p.y_cm + p.width_cm / 2 < t.width / 2 ? (mL += w) : (mR += w));
+      (p.x_cm + p.length_cm / 2 < t.length / 2 ? (mF += w) : (mRe += w));
+    }
+    const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
+    const lr = mL + mR, fr = mF + mRe;
+    window.renderStatsOnly({
+      volume_used_pct: pct(used, truckVol), total_weight_kg: Math.round(wt * 100) / 100,
+      max_payload_kg: t.max_payload, balance_left_pct: pct(mL, lr), balance_right_pct: lr ? 100 - pct(mL, lr) : 0,
+      balance_front_pct: pct(mF, fr), balance_rear_pct: fr ? 100 - pct(mF, fr) : 0, warnings: [],
+    });
+  };
+
+  function rotateSelected() {
+    const p = working.find((w) => w.box_id === selectedId);
+    if (!p) return;
+    const cand = { ...p, length_cm: p.width_cm, width_cm: p.length_cm };
+    const others = working.filter((w) => w.box_id !== p.box_id);
+    const snapped = window.Layout.snapPosition(cand, others, window._view.truck, 5);
+    if (!snapped) return; // won't fit rotated here
+    Object.assign(p, { length_cm: p.width_cm, width_cm: p.length_cm, x_cm: snapped.x_cm, y_cm: snapped.y_cm, z_cm: snapped.z_cm });
+    rebuildMeshes(); Editor._onLayoutChanged();
+  }
+
+  function deleteSelected() {
+    working = working.filter((w) => w.box_id !== selectedId);
+    select(null); rebuildMeshes(); Editor._onLayoutChanged();
+  }
+
+  // Re-render boxes from `working` (used after rotate/delete which change geometry/count).
+  function rebuildMeshes() {
+    window._rerenderEditing(working); // provided by load-planner (Task 11)
+  }
+
+  async function reset() {
+    const r = await window._packCurrentTrip(); // provided by load-planner (Task 11)
+    working = r.placements.map((p) => ({ ...p }));
+    select(null); rebuildMeshes(); Editor._onLayoutChanged();
+  }
+
   // wire buttons
   window.addEventListener('DOMContentLoaded', () => {
     $('edit-enter').addEventListener('click', enter);
     $('edit-cancel').addEventListener('click', () => { restore(); leave(); });
+  });
+  window.addEventListener('DOMContentLoaded', () => {
+    $('edit-rotate').addEventListener('click', rotateSelected);
+    $('edit-delete').addEventListener('click', deleteSelected);
+    $('edit-reset').addEventListener('click', reset);
   });
   function restore() { /* filled in Task 11 */ }
 
