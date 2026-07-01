@@ -2,8 +2,11 @@
   const Editor = { active: false };
   let working = [];        // placements being edited (mutable copies)
   let preEdit = null;      // snapshot for Cancel
-  let selectedId = null;
+  const selected = new Set(); // box_ids currently selected (multi-select)
   let dragging = false, dragBox = null;
+  let groupDrag = false;      // true when dragging the whole selection together
+  let primaryPre = null;      // dragged box's pre-drag {x_cm,y_cm,z_cm}
+  let groupSnapshot = null;   // [{box_id,x_cm,y_cm,z_cm}] group positions at drag start
   let restore = () => {};  // reassigned in Task 11 wiring below
 
   const $ = (id) => document.getElementById(id);
@@ -28,14 +31,35 @@
     $('edit-enter').style.display = '';
   }
 
-  function select(id) {
-    selectedId = id;
+  // Highlight every box in `selected` (emissive glow); clear all others. Also
+  // updates the #edit-selname summary. Pass a single id to replace the selection,
+  // an array/Set to set it explicitly, or null/[] to clear.
+  function select(sel) {
+    if (sel === null || sel === undefined) {
+      selected.clear();
+    } else if (typeof sel === 'string') {
+      selected.clear(); selected.add(sel);
+    } else if (sel instanceof Set) {
+      if (sel !== selected) { selected.clear(); sel.forEach((id) => selected.add(id)); }
+    } else if (Array.isArray(sel)) {
+      selected.clear(); sel.forEach((id) => selected.add(id));
+    }
+    highlight();
+  }
+
+  // Re-apply the emissive glow to exactly the boxes in `selected`, and refresh
+  // the #edit-selname summary text.
+  function highlight() {
     window._view.boxMeshes.forEach((m) => {
-      const on = m.placement.box_id === id;
+      const on = selected.has(m.placement.box_id);
       if (m.mesh.material && m.mesh.material.emissive) m.mesh.material.emissive.setHex(on ? 0x0891b2 : 0x000000);
     });
-    const p = working.find((w) => w.box_id === id);
-    $('edit-selname').textContent = p ? (p.product_name || 'Box') : '—';
+    const el = $('edit-selname');
+    if (selected.size === 0) { el.textContent = '—'; }
+    else if (selected.size === 1) {
+      const p = working.find((w) => selected.has(w.box_id));
+      el.textContent = p ? (p.product_name || 'Box') : '—';
+    } else { el.textContent = selected.size + ' boxes'; }
   }
 
   // raycast helper: returns the boxMesh under the pointer, or null
@@ -73,29 +97,98 @@
   Editor.onPointerDown = function (e) {
     if (!Editor.active) return false;
     const bm = pick(e);
-    if (!bm) { select(null); return false; } // let the camera orbit
-    select(bm.placement.box_id);
+    if (!bm) {
+      // Empty space: shift/ctrl leaves selection alone; plain click clears it.
+      if (!(e.shiftKey || e.ctrlKey || e.metaKey)) select(null);
+      return false; // let the camera orbit
+    }
+    const id = bm.placement.box_id;
+
+    // Shift/Ctrl/Cmd-click toggles membership and never starts a drag.
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      if (selected.has(id)) selected.delete(id); else selected.add(id);
+      highlight();
+      return true; // consume — no orbit, no drag
+    }
+
     // Drag the WORKING copy (what gets saved + collision-checked), not the mesh's own
     // placement object — otherwise moves wouldn't persist and collision would use stale coords.
+    dragBox = working.find((w) => w.box_id === id) || bm.placement;
+
+    if (selected.has(id) && selected.size > 1) {
+      // Group drag: keep the existing selection, move it all together.
+      groupDrag = true;
+    } else {
+      // Replace selection with just this box, single drag.
+      select(id);
+      groupDrag = false;
+    }
     dragging = true;
-    dragBox = working.find((w) => w.box_id === bm.placement.box_id) || bm.placement;
+    // Snapshot pre-drag positions so we can reject/revert cleanly.
+    primaryPre = { x_cm: dragBox.x_cm, y_cm: dragBox.y_cm, z_cm: dragBox.z_cm };
+    groupSnapshot = working
+      .filter((w) => selected.has(w.box_id))
+      .map((w) => ({ box_id: w.box_id, x_cm: w.x_cm, y_cm: w.y_cm, z_cm: w.z_cm }));
     return true; // we handled it — no orbit
   };
   Editor.onPointerMove = function (e) {
     if (!dragging || !dragBox) return false;
     const fp = floorPoint(e);
     if (!fp) return true;
+    const truck = window._view.truck;
     // Three.X = packer x (depth), Three.Z = packer y (width). Footprint centre → corner.
-    const raw = { ...dragBox, x_cm: fp.x - dragBox.length_cm / 2, y_cm: fp.z - dragBox.width_cm / 2 };
-    const others = working.filter((w) => w.box_id !== dragBox.box_id);
-    const snapped = window.Layout.snapPosition(raw, others, window._view.truck, 5);
-    if (!snapped) return true; // no legal spot — leave the box where it was
-    dragBox.x_cm = snapped.x_cm; dragBox.y_cm = snapped.y_cm; dragBox.z_cm = snapped.z_cm;
-    applyToMesh(dragBox);
-    if (window.Editor._onLayoutChanged) window.Editor._onLayoutChanged(); // live stats (Task 10)
+    const rawPrimary = { ...dragBox, x_cm: fp.x - dragBox.length_cm / 2, y_cm: fp.z - dragBox.width_cm / 2 };
+
+    if (!groupDrag) {
+      const others = working.filter((w) => w.box_id !== dragBox.box_id);
+      const snapped = window.Layout.snapPosition(rawPrimary, others, truck, 5);
+      if (!snapped) return true; // no legal spot — leave the box where it was
+      dragBox.x_cm = snapped.x_cm; dragBox.y_cm = snapped.y_cm; dragBox.z_cm = snapped.z_cm;
+      applyToMesh(dragBox);
+      if (window.Editor._onLayoutChanged) window.Editor._onLayoutChanged(); // live stats (Task 10)
+      return true;
+    }
+
+    // ── Group drag ──────────────────────────────────────────────
+    const nonSelected = working.filter((w) => !selected.has(w.box_id));
+    // Snap the primary against the non-selected boxes only.
+    const snapped = window.Layout.snapPosition(rawPrimary, nonSelected, truck, 5);
+    if (!snapped) return true; // reject — leave the group where it is
+    const dx = snapped.x_cm - primaryPre.x_cm;
+    const dy = snapped.y_cm - primaryPre.y_cm;
+    const dz = snapped.z_cm - primaryPre.z_cm;
+
+    // Compute moved positions for the whole group from its pre-drag snapshot.
+    const moved = groupSnapshot.map((s) => ({
+      box_id: s.box_id, x_cm: s.x_cm + dx, y_cm: s.y_cm + dy, z_cm: s.z_cm + dz,
+    }));
+
+    // Validate: every moved box in-bounds and not overlapping any non-selected box.
+    let ok = true;
+    for (const m of moved) {
+      const w = working.find((b) => b.box_id === m.box_id);
+      const cand = { ...w, x_cm: m.x_cm, y_cm: m.y_cm, z_cm: m.z_cm };
+      if (!window.Layout.withinTruck(cand, truck)) { ok = false; break; }
+      for (const o of nonSelected) {
+        if (window.Layout.boxesOverlap(cand, o)) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+    if (!ok) return true; // reject — group stays put (never mutated)
+
+    // Commit the whole group.
+    for (const m of moved) {
+      const w = working.find((b) => b.box_id === m.box_id);
+      w.x_cm = m.x_cm; w.y_cm = m.y_cm; w.z_cm = m.z_cm;
+      applyToMesh(w);
+    }
+    if (window.Editor._onLayoutChanged) window.Editor._onLayoutChanged();
     return true;
   };
-  Editor.onPointerUp = function () { dragging = false; dragBox = null; };
+  Editor.onPointerUp = function () {
+    dragging = false; dragBox = null; groupDrag = false;
+    primaryPre = null; groupSnapshot = null;
+  };
 
   Editor._onLayoutChanged = function () {
     const t = window._view.truck;
@@ -117,19 +210,50 @@
   };
 
   function rotateSelected() {
-    const p = working.find((w) => w.box_id === selectedId);
-    if (!p) return;
-    const cand = { ...p, length_cm: p.width_cm, width_cm: p.length_cm };
-    const others = working.filter((w) => w.box_id !== p.box_id);
-    const snapped = window.Layout.snapPosition(cand, others, window._view.truck, 5);
-    if (!snapped) return; // won't fit rotated here
-    Object.assign(p, { length_cm: p.width_cm, width_cm: p.length_cm, x_cm: snapped.x_cm, y_cm: snapped.y_cm, z_cm: snapped.z_cm });
-    rebuildMeshes(); select(selectedId); Editor._onLayoutChanged(); // re-apply the glow after rebuild
+    if (selected.size === 0) return;
+    const ids = working.filter((w) => selected.has(w.box_id)).map((w) => w.box_id);
+    for (const id of ids) {
+      const p = working.find((w) => w.box_id === id);
+      if (!p) continue;
+      const cand = { ...p, length_cm: p.width_cm, width_cm: p.length_cm };
+      const others = working.filter((w) => w.box_id !== p.box_id);
+      const snapped = window.Layout.snapPosition(cand, others, window._view.truck, 5);
+      if (!snapped) continue; // skip a box that won't fit rotated
+      Object.assign(p, { length_cm: p.width_cm, width_cm: p.length_cm, x_cm: snapped.x_cm, y_cm: snapped.y_cm, z_cm: snapped.z_cm });
+    }
+    rebuildMeshes(); select(new Set(selected)); Editor._onLayoutChanged(); // re-apply the glow after rebuild
   }
 
   function deleteSelected() {
-    working = working.filter((w) => w.box_id !== selectedId);
+    if (selected.size === 0) return;
+    working = working.filter((w) => !selected.has(w.box_id));
     select(null); rebuildMeshes(); Editor._onLayoutChanged();
+  }
+
+  // Select all working boxes on the same height layer AND overlapping the reference
+  // box's depth band — i.e. the line of boxes across the truck width at that depth+layer.
+  function selectRow() {
+    const ref = working.find((w) => selected.has(w.box_id));
+    if (!ref) return; // no reference box
+    const ids = new Set();
+    for (const a of working) {
+      const sameLayer = Math.abs(a.z_cm - ref.z_cm) < 1;
+      const depthOverlap = a.x_cm < ref.x_cm + ref.length_cm && a.x_cm + a.length_cm > ref.x_cm;
+      if (sameLayer && depthOverlap) ids.add(a.box_id);
+    }
+    select(ids);
+  }
+
+  // Select every working box sharing the reference box's product_name.
+  function selectProduct() {
+    const ref = working.find((w) => selected.has(w.box_id));
+    if (!ref) return;
+    const ids = new Set();
+    for (const a of working) if (a.product_name === ref.product_name) ids.add(a.box_id);
+    select(ids);
+    // Nice-to-have: reflect the product name in the button label.
+    const btn = $('edit-selproduct');
+    if (btn && ref.product_name) btn.textContent = 'Select all of ' + ref.product_name;
   }
 
   // Re-render boxes from `working` (used after rotate/delete which change geometry/count).
@@ -152,6 +276,8 @@
     $('edit-rotate').addEventListener('click', rotateSelected);
     $('edit-delete').addEventListener('click', deleteSelected);
     $('edit-reset').addEventListener('click', reset);
+    $('edit-selrow').addEventListener('click', selectRow);
+    $('edit-selproduct').addEventListener('click', selectProduct);
   });
 
   restore = function () {
@@ -175,6 +301,6 @@
     $('edit-save').addEventListener('click', save);
   });
 
-  Editor._debug = { get working() { return working; }, select };
+  Editor._debug = { get working() { return working; }, get selected() { return selected; }, select };
   window.Editor = Editor;
 })();
