@@ -567,6 +567,60 @@ details > .row { padding: 14px; }
   transform: translateX(-50%) translateY(8px);
 }
 
+/* floating control cluster top-right of the 3D stage — glassy dark chips */
+.viewer-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  z-index: 3;
+  user-select: none;
+}
+.vc-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(13, 20, 29, 0.72);
+  backdrop-filter: saturate(170%) blur(8px);
+  -webkit-backdrop-filter: saturate(170%) blur(8px);
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.8);
+}
+.vc-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 5px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.vc-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-heading); }
+.vc-btn:active { background: rgba(255, 255, 255, 0.12); }
+.vc-btn.vc-icon { font-size: 15px; padding: 4px 10px; }
+.vc-btn.is-active {
+  background: var(--accent-grad);
+  color: #04222a;
+  box-shadow: 0 0 14px -3px rgba(34, 211, 238, 0.6);
+}
+.vc-btn.is-active:hover { color: #04222a; }
+@media (max-width: 640px) {
+  .viewer-controls { top: 8px; right: 8px; gap: 6px; }
+  .vc-btn { font-size: 11px; padding: 4px 9px; }
+}
+@media print {
+  .viewer-controls { display: none !important; }
+}
+
 /* ---------- Load sheet ---------- */
 #loadsheet { margin-top: 18px; }
 #loadsheet h3 {

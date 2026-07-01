@@ -179,6 +179,111 @@ const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30]
 let _threeRenderer = null, _animId = null;
 let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
 let _anims = [], _truckH = 240;
+let _labelsOn = true;                 // Labels toggle — default ON
+let _activeResize = null;             // resize fn for the current render's canvas
+let _installedGlobalListeners = false; // guard so window listeners attach once
+let _fullscreenBound = false;          // guard so the fullscreen button binds once
+
+// Bind a viewer-control button by id. The button elements persist across
+// renders, so we replace the handler each render (no stacking of listeners).
+function bindViewerControl(id, handler) {
+  const btn = document.getElementById(id);
+  if (btn) btn.onclick = handler;
+}
+
+// Window-level resize + fullscreenchange listeners. The canvas is recreated on
+// every renderBlueprint call, so these delegate to `_activeResize`, which always
+// points at the live canvas. Installed once (guarded) to avoid duplicate stacking.
+function installGlobalViewerListeners() {
+  if (!_installedGlobalListeners) {
+    const onResize = () => { if (_activeResize) _activeResize(); };
+    window.addEventListener('resize', onResize);
+    document.addEventListener('fullscreenchange', onResize);
+    // give the browser a tick to settle fullscreen layout before re-measuring
+    document.addEventListener('fullscreenchange', () => setTimeout(onResize, 60));
+    _installedGlobalListeners = true;
+  }
+  // Fullscreen toggle button (persistent element) — bind once.
+  if (!_fullscreenBound) {
+    const fsBtn = document.getElementById('vc-fullscreen');
+    if (fsBtn) {
+      fsBtn.onclick = () => {
+        const stage = document.querySelector('.viewer-stage');
+        if (!stage) return;
+        if (!document.fullscreenElement) {
+          if (stage.requestFullscreen) stage.requestFullscreen();
+        } else if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+      };
+      _fullscreenBound = true;
+    }
+  }
+}
+
+// Build one text sprite per box, above its top face. Textures are cached per
+// distinct product name (a handful of textures, not one per box). Sprites are
+// added straight to the scene (NOT to _boxMeshes) and given a no-op raycast so
+// they never interfere with the editor's box picking.
+function buildLabels(scene, THREE, boxMeshes, maxDim) {
+  const texCache = new Map();
+  const sprites = [];
+  const worldScale = Math.max(28, maxDim * 0.11); // readable constant world size
+
+  const textureFor = (name) => {
+    if (texCache.has(name)) return texCache.get(name);
+    const label = String(name || 'Goods');
+    const text = label.length > 10 ? label.slice(0, 9) + '…' : label;
+    const cw = 256, ch = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    const r = 22;
+    ctx.fillStyle = 'rgba(13,20,29,0.82)';
+    ctx.beginPath();
+    ctx.moveTo(r, 8); ctx.lineTo(cw - r, 8);
+    ctx.arcTo(cw - 8, 8, cw - 8, 8 + r, r); ctx.lineTo(cw - 8, ch - 8 - r);
+    ctx.arcTo(cw - 8, ch - 8, cw - 8 - r, ch - 8, r); ctx.lineTo(r, ch - 8);
+    ctx.arcTo(8, ch - 8, 8, ch - 8 - r, r); ctx.lineTo(8, 8 + r);
+    ctx.arcTo(8, 8, r, 8, r); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(45,212,191,0.55)';
+    ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = 'bold 46px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, cw / 2, ch / 2 + 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    texCache.set(name, tex);
+    return tex;
+  };
+
+  for (const b of boxMeshes) {
+    const name = b.placement.product_name;
+    const mat = new THREE.SpriteMaterial({ map: textureFor(name), transparent: true, depthTest: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(worldScale * 2, worldScale, 1); // texture is 2:1
+    const top = b.placement.z_cm + b.placement.height_cm;
+    sprite.position.set(
+      b.placement.x_cm + b.placement.length_cm / 2,
+      top + worldScale * 0.65,
+      b.placement.y_cm + b.placement.width_cm / 2);
+    sprite.raycast = () => {}; // no-op: never intercept editor picking
+    scene.add(sprite);
+    sprites.push({ sprite, box: b });
+  }
+  return sprites;
+}
+
+function applyLabelVisibility(sprites) {
+  for (const s of sprites) {
+    // follow both the global toggle and the owning box's visibility (walkthrough)
+    s.sprite.visible = _labelsOn && s.box.mesh.visible;
+  }
+  _activeLabelSprites = sprites;
+}
+let _activeLabelSprites = [];
 
 function renderStatsOnly(s) {
   document.getElementById('stats').innerHTML = `
@@ -313,11 +418,17 @@ function renderBlueprint(result) {
   // --- Orbit camera via spherical coords around the truck centre ---
   const maxDim = Math.max(truck.length, truck.width, truck.height);
   const centre = new THREE.Vector3(truck.length / 2, truck.height / 2, truck.width / 2);
-  const radius = maxDim * 1.9; // matches the previous framing distance
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // Zoom bounds keyed to truck size so wheel/pinch can't lose the load.
+  const radiusMin = maxDim * 0.6;
+  const radiusMax = maxDim * 4;
+  // Default framing sits a touch closer than before so the boxes read bigger.
+  const DEFAULT_RADIUS = maxDim * 1.55;
+  let radius = DEFAULT_RADIUS;
   // Spherical: azimuth around Y, elevation from the horizontal plane.
-  let azimuth = 0;        // starts looking along +x/+z like the old orbit
-  let elevation = 0.8;    // a comfortable raised viewing angle
+  const DEFAULT_AZIMUTH = 0, DEFAULT_ELEVATION = 0.8;
+  let azimuth = DEFAULT_AZIMUTH; // starts looking along +x/+z like the old orbit
+  let elevation = DEFAULT_ELEVATION; // a comfortable raised viewing angle
   let userInteracted = false;
   let dragging = false;
   let startX = 0, startY = 0, startAz = 0, startEl = 0;
@@ -370,6 +481,94 @@ function renderBlueprint(result) {
   canvas.addEventListener('pointerup', stopDrag);
   canvas.addEventListener('pointerleave', stopDrag);
   canvas.addEventListener('pointercancel', stopDrag);
+
+  // Mark that the user has taken control → stop auto-rotate + drop the hint badge.
+  function markInteracted() {
+    if (!userInteracted) {
+      userInteracted = true;
+      if (badge) badge.classList.add('is-hidden');
+    }
+  }
+
+  // --- Zoom: mouse wheel adjusts radius (clamped to the truck-sized bounds) ---
+  // The canvas is recreated each render, so attaching here binds the fresh canvas.
+  const onWheel = (e) => {
+    e.preventDefault();
+    markInteracted();
+    const factor = Math.exp(e.deltaY * 0.0012); // smooth multiplicative zoom
+    radius = clamp(radius * factor, radiusMin, radiusMax);
+    applyCamera();
+  };
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+
+  // --- Touch pinch-zoom (two fingers) ---
+  let pinchStartDist = 0, pinchStartRadius = radius;
+  const touchDist = (t) => {
+    const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDist(e.touches);
+      pinchStartRadius = radius;
+    }
+  };
+  const onTouchMove = (e) => {
+    if (e.touches.length === 2 && pinchStartDist > 0) {
+      e.preventDefault();
+      markInteracted();
+      const d = touchDist(e.touches);
+      radius = clamp(pinchStartRadius * (pinchStartDist / d), radiusMin, radiusMax);
+      applyCamera();
+    }
+  };
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+
+  // --- View presets: jump the camera and stop auto-rotate. ---
+  function setPreset(az, el, rad) {
+    markInteracted();
+    azimuth = az; elevation = el; radius = clamp(rad, radiusMin, radiusMax);
+    applyCamera();
+  }
+  // Top = straight down; Side = from the left wall (z=0); Front = from the rear
+  // doors (packer x=0); Reset = the default raised 3-quarter view.
+  const presetHandlers = {
+    top:   () => setPreset(0, 1.45, maxDim * 1.7),
+    side:  () => setPreset(-Math.PI / 2, 0.28, maxDim * 1.7),
+    front: () => setPreset(Math.PI, 0.28, maxDim * 1.7),
+    reset: () => setPreset(DEFAULT_AZIMUTH, DEFAULT_ELEVATION, DEFAULT_RADIUS),
+  };
+  bindViewerControl('vc-top', presetHandlers.top);
+  bindViewerControl('vc-side', presetHandlers.side);
+  bindViewerControl('vc-front', presetHandlers.front);
+  bindViewerControl('vc-reset', presetHandlers.reset);
+
+  // --- Labels: one cached texture per distinct product, shown above each box ---
+  const labelSprites = buildLabels(scene, THREE, _boxMeshes, maxDim);
+  applyLabelVisibility(labelSprites);
+  bindViewerControl('vc-labels', () => {
+    _labelsOn = !_labelsOn;
+    const btn = document.getElementById('vc-labels');
+    if (btn) { btn.classList.toggle('is-active', _labelsOn); btn.setAttribute('aria-pressed', String(_labelsOn)); }
+    applyLabelVisibility(labelSprites);
+  });
+  // reflect current toggle state on the (persistent) button each render
+  const labelsBtn = document.getElementById('vc-labels');
+  if (labelsBtn) { labelsBtn.classList.toggle('is-active', _labelsOn); labelsBtn.setAttribute('aria-pressed', String(_labelsOn)); }
+
+  // --- Resize / fullscreen: keep renderer + camera aspect matched to the stage ---
+  function resizeViewer() {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  // Expose the current render's resize so the once-installed global listeners
+  // (added below) can drive whichever canvas is live.
+  _activeResize = resizeViewer;
+  installGlobalViewerListeners();
 
   // Publish the live view so the editor can select/drag boxes against this scene.
   window._view = {
@@ -475,6 +674,7 @@ function setStep(n, animate) {
     b.mesh.material.emissive.setHex(isCurrent ? 0x2a2a00 : 0x000000);
     if (visible) b.mesh.position.y = b.finalY; // default at rest
   }
+  if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
   // animate the just-revealed set dropping into place
   if (animate && goingForward && n >= 1) {
     const setBoxes = _boxMeshes.filter((b) => b.step === n).sort((a, c) => a.order - c.order);
