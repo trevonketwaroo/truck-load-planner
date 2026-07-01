@@ -157,6 +157,22 @@ document.getElementById('pack-btn').onclick = async () => {
   renderItems();
   // Initial readiness check (will set pack button disabled)
   checkPackReady();
+
+  // Deep-link: open the app with ?trip=<id> to jump straight to that trip's packed
+  // blueprint (ready to Edit) instead of rebuilding it by hand.
+  const tripParam = new URLSearchParams(location.search).get('trip');
+  if (tripParam) {
+    const trip = await api(`/trips/${tripParam}`);
+    if (trip && !trip.error) {
+      state.tripId = trip.id;
+      const sel = document.getElementById('truck-select');
+      if (trip.truck_id) sel.value = String(trip.truck_id);
+      if (trip.packing_result && trip.packing_result.placements) {
+        showResult(trip.packing_result);
+        document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }
 })();
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
