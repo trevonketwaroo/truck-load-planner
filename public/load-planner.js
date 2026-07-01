@@ -234,7 +234,22 @@ function showResult(result) {
     `${loadSheetHtml}<h3>Unload order</h3>${unloadView}`;
 
   renderBlueprint(result);
+  window._lastResult = result;
 }
+
+window._lastResult = null;
+window._rerenderEditing = function (placements) {
+  // re-render the 3D from an in-progress edited layout WITHOUT recomputing order/stats
+  renderBlueprint({ placements, stats: window._lastResult.stats, unplaced: [] });
+  window._editActive = true; // stay in edit mode after a rebuild
+};
+window._packCurrentTrip = function () {
+  return api(`/trips/${state.tripId}/pack`, { method: 'POST' });
+};
+window._saveLayout = function (body) {
+  return api(`/trips/${state.tripId}/layout`, { method: 'PUT', body: JSON.stringify(body) });
+};
+window.showResult = showResult; // expose for the editor's Save
 
 function renderBlueprint(result) {
   if (_animId) cancelAnimationFrame(_animId);

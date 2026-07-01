@@ -4,6 +4,7 @@
   let preEdit = null;      // snapshot for Cancel
   let selectedId = null;
   let dragging = false, dragBox = null;
+  let restore = () => {};  // reassigned in Task 11 wiring below
 
   const $ = (id) => document.getElementById(id);
   const meshById = (id) => (window._view.boxMeshes.find((m) => m.placement.box_id === id) || {}).mesh;
@@ -149,7 +150,27 @@
     $('edit-delete').addEventListener('click', deleteSelected);
     $('edit-reset').addEventListener('click', reset);
   });
-  function restore() { /* filled in Task 11 */ }
+
+  restore = function () {
+    working = JSON.parse(JSON.stringify(preEdit));
+    window._rerenderEditing(working);
+  };
+
+  async function save() {
+    const body = { placements: working.map((p) => ({
+      box_id: p.box_id, product_id: p.product_id, product_name: p.product_name,
+      stop_index: p.stop_index, x_cm: p.x_cm, y_cm: p.y_cm, z_cm: p.z_cm,
+      length_cm: p.length_cm, width_cm: p.width_cm, height_cm: p.height_cm, weight_kg: p.weight_kg,
+    })) };
+    const r = await window._saveLayout(body); // api PUT /layout, provided below
+    if (r.error) { alert(r.error + (r.details ? '\n' + r.details.join('\n') : '')); return; }
+    leave();
+    window.showResult(r);            // full re-render: blueprint + load sheet + walkthrough + stats
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    $('edit-save').addEventListener('click', save);
+  });
 
   Editor._debug = { get working() { return working; }, select };
   window.Editor = Editor;
