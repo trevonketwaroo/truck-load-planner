@@ -630,9 +630,8 @@ details > .row { padding: 14px; }
   .viewer-controls { top: 8px; right: 8px; gap: 6px; }
   .vc-btn { font-size: 11px; padding: 4px 9px; }
 }
-@media print {
-  .viewer-controls { display: none !important; }
-}
+/* (print rules for .viewer-controls are consolidated into the main @media print
+   block near the bottom of this file.) */
 
 /* ---------- Load sheet ---------- */
 #loadsheet { margin-top: 18px; }
@@ -685,6 +684,119 @@ details > .row { padding: 14px; }
 }
 #loadsheet table tr:last-child td { border-bottom: none; }
 #loadsheet table tr:nth-child(even) td { background: rgba(255, 255, 255, 0.025); }
+
+/* ---------- Loading instructions (worker-friendly load sheet) ---------- */
+.ls-sheet { margin-top: 6px; }
+
+.ls-header { margin-bottom: 14px; }
+.ls-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--text-heading);
+}
+.ls-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ls-subtitle .ls-dot { color: var(--text-faint); }
+.ls-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.ls-total {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+}
+.ls-total strong { color: var(--text-heading); font-weight: 800; }
+
+/* Blueprint image: hidden on screen (the live 3D viewer above already shows it);
+   revealed and enlarged for print. */
+.ls-blueprint { display: none; }
+#print-blueprint { display: none; }
+
+.ls-instructions-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text-heading);
+  margin: 18px 0 12px;
+  letter-spacing: 0.01em;
+}
+
+.ls-steps { display: flex; flex-direction: column; gap: 12px; }
+.ls-step {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+.ls-step-num {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  min-height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #14b8a6, #22d3ee);
+  color: #06181b;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+.ls-step-body { flex: 1 1 auto; min-width: 0; }
+.ls-step-load {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-heading);
+  line-height: 1.2;
+}
+.ls-step-load .ls-qty { color: var(--accent-hover); font-weight: 900; }
+.ls-step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ls-step-where {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.ls-unload {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.ls-unload-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text-heading);
+  margin-bottom: 8px;
+}
+.ls-unload-list { margin: 0; padding-left: 22px; }
+.ls-unload-row { font-size: 15px; margin: 4px 0; color: var(--text); }
+.ls-first { color: var(--warning); font-weight: 800; }
 
 .print-btn { margin-top: 18px; }
 
@@ -953,7 +1065,23 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   section:hover, .card:hover, .table-card:hover { transform: none; box-shadow: none; }
   .app-header, .app-footer, #walkthrough,
   .print-btn, .add-row, .step-actions, details,
-  .viewer-badge { display: none !important; }
+  .viewer-badge, .viewer-controls,
+  /* Hide the live 3D viewer + its interactive chrome — the captured
+     #print-blueprint image replaces it on paper. */
+  .viewer-stage, #viewer, #stats,
+  #edit-bar, .edit-bar, #edit-hint, .edit-hint,
+  #edit-enter, .card-head button, .ctx-menu,
+  /* Only the load-planner page has these; hide everything above the sheet. */
+  #truck-section, #result-section > .card-head { display: none !important; }
+
+  /* The result section carries the whole printed sheet — strip its card chrome. */
+  #result-section {
+    border: none !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
 
   .page-title, .page-sub,
   #loadsheet h3, #loadsheet h4, #loadsheet .muted,
@@ -980,7 +1108,69 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   .door-tag.door-side { background: #d8f3ee !important; color: #0b6f66 !important; }
   .door-tag.door-rear { background: #fbeccc !important; color: #b8730f !important; }
 
-  #viewer { break-inside: avoid; }
+  /* ----- Loading instructions on paper: black-on-white, big & legible ----- */
+  .ls-sheet { color: #000 !important; }
+  .ls-title { font-size: 26pt !important; color: #000 !important; }
+  .ls-subtitle { font-size: 14pt !important; color: #000 !important; }
+  .ls-totals { gap: 8px !important; }
+  .ls-total {
+    background: #fff !important;
+    border: 1px solid #000 !important;
+    color: #000 !important;
+    font-size: 12pt !important;
+  }
+  .ls-total strong { color: #000 !important; }
+
+  /* Show the captured blueprint image prominently at the top of the sheet. */
+  .ls-blueprint { display: block !important; break-inside: avoid; margin: 8px 0 6px; text-align: center; }
+  #print-blueprint {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 4.2in !important;
+    object-fit: contain;
+    border: 1px solid #000 !important;
+    border-radius: 4px;
+    background: #fff !important;
+  }
+
+  .ls-instructions-title,
+  .ls-unload-title { font-size: 15pt !important; font-weight: 900 !important; color: #000 !important; }
+
+  .ls-steps { gap: 10px !important; }
+  .ls-step {
+    background: #fff !important;
+    border: 2px solid #000 !important;
+    border-radius: 6px;
+    break-inside: avoid;   /* never split a step across pages */
+    page-break-inside: avoid;
+    padding: 10px 12px !important;
+  }
+  .ls-step-num {
+    background: #000 !important;
+    color: #fff !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    font-size: 22pt !important;
+    border-radius: 8px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .ls-step-load { font-size: 16pt !important; color: #000 !important; }
+  .ls-step-load .ls-qty { color: #000 !important; }
+  .ls-step-meta { font-size: 12pt !important; color: #000 !important; }
+  .ls-step-where { font-size: 11pt !important; color: #222 !important; }
+
+  .ls-unload { break-inside: avoid; }
+  .ls-unload-row { font-size: 12pt !important; color: #000 !important; }
+  .ls-first { color: #000 !important; font-weight: 900 !important; text-decoration: underline; }
+
+  /* Keep door badges filled so they read on a black-and-white printer too. */
+  .door-tag {
+    border: 1px solid #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 /* ==========================================================================

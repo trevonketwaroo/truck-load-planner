@@ -183,8 +183,39 @@ let _labelsOn = false;                // "Labels" toggle — default OFF (too cl
 let _labelSelection = new Set();      // box_ids whose label shows even when the toggle is off
                                       // (driven by the editor selection: name shows on click)
 let _activeResize = null;             // resize fn for the current render's canvas
+let _activeCanvas = null;             // live renderer canvas for the print-blueprint capture
 let _installedGlobalListeners = false; // guard so window listeners attach once
 let _fullscreenBound = false;          // guard so the fullscreen button binds once
+let _beforePrintInstalled = false;     // guard so the beforeprint capture attaches once
+
+// Capture the live WebGL canvas into the print-only <img id="print-blueprint">.
+// Requires the renderer to be created with preserveDrawingBuffer:true, otherwise
+// toDataURL() on a WebGL canvas comes back blank. Attached once (guarded); it
+// always reads `_activeCanvas`, which points at whichever render is current.
+function installBeforePrintCapture() {
+  if (_beforePrintInstalled) return;
+  const capture = () => {
+    const img = document.getElementById('print-blueprint');
+    if (!img || !_activeCanvas) return;
+    try {
+      // Force one render so the drawing buffer is fresh at capture time.
+      if (_threeRenderer && window._view) {
+        _threeRenderer.render(window._view.scene, window._view.camera);
+      }
+      img.src = _activeCanvas.toDataURL('image/png');
+      img.style.display = '';
+    } catch (_) { /* leave the previous src if capture fails */ }
+  };
+  window.addEventListener('beforeprint', capture);
+  // Safari / older browsers fire the print media query instead of beforeprint.
+  if (window.matchMedia) {
+    const mq = window.matchMedia('print');
+    const onChange = (e) => { if (e.matches) capture(); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  }
+  _beforePrintInstalled = true;
+}
 
 // Bind a viewer-control button by id. The button elements persist across
 // renders, so we replace the handler each render (no stacking of listeners).
@@ -314,55 +345,116 @@ function showResult(result) {
       `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>`);
   }
 
-  // Load order as a human list: group boxes into sets (same door + product + stop)
-  // in load order. "Load 14× Milk for stop 1", etc. — what the crew needs.
-  // The load sheet is grouped by DOOR first (side door loaded first, then rear),
-  // then by load order within each door group.
+  // ===== WORKER-FRIENDLY LOADING INSTRUCTIONS =====
+  // Rebuild the load sheet as big numbered steps a crew can follow without
+  // supervision. We reuse the SAME grouping the on-screen walkthrough uses:
+  // consecutive placements with the same load_via + product_name + stop_index,
+  // in load order (first set goes in deepest / loads first).
   const sorted = [...result.placements].sort((a, b) => a.load_order - b.load_order);
-  const hasSide = sorted.some((p) => p.load_via === 'side');
-  const buildSets = (rows) => {
-    const sets = [];
-    let cur = null;
-    for (const p of rows) {
-      const key = `${p.product_name || 'Goods'}|${p.stop_index}`;
-      if (!cur || cur.key !== key) {
-        cur = { key, name: p.product_name || 'Goods', stop: p.stop_index, n: 0 };
-        sets.push(cur);
-      }
-      cur.n++;
-    }
-    return sets;
-  };
-  const setsTable = (sets) =>
-    `<table class="loadsheet-table"><thead><tr><th>#</th><th>Load</th><th>For</th></tr></thead><tbody>${
-      sets.map((s, i) =>
-        `<tr><td>${i + 1}</td><td><strong>${s.n}×</strong> ${esc(s.name)}</td><td>Stop ${s.stop + 1}</td></tr>`
-      ).join('')}</tbody></table>`;
+  const truck = currentTruckDims();
 
-  let loadSheetHtml;
-  if (hasSide) {
-    const sideSets = buildSets(sorted.filter((p) => p.load_via === 'side'));
-    const rearSets = buildSets(sorted.filter((p) => p.load_via === 'rear'));
-    loadSheetHtml =
-      `<h3>Load in this order (first item goes deepest)</h3>
-       <h4>1. Through the <span class="door-tag door-side">SIDE door</span> (loaded first, then close it)</h4>
-       ${sideSets.length ? setsTable(sideSets) : '<p class="muted">Nothing loads through the side door.</p>'}
-       <h4>2. Through the <span class="door-tag door-rear">REAR doors</span></h4>
-       ${rearSets.length ? setsTable(rearSets) : '<p class="muted">Nothing loads through the rear doors.</p>'}`;
-  } else {
-    loadSheetHtml =
-      `<h3>Load in this order (first item goes deepest)</h3>
-       ${setsTable(buildSets(sorted))}`;
+  // Stop labels come from the trip form (state.stops). On a deep-link load the
+  // form may be empty, so fall back to "Stop N".
+  const stopName = (si) => {
+    const lbl = state.stops && state.stops[si] && (state.stops[si].label || '').trim();
+    return lbl ? `Stop ${si + 1} — ${lbl}` : `Stop ${si + 1}`;
+  };
+
+  // Group into loading sets (identical to setupWalkthrough's grouping).
+  const steps = [];
+  {
+    let cur = null;
+    for (const p of sorted) {
+      const via = p.load_via || 'rear';
+      const key = `${via}|${p.product_name || 'Goods'}|${p.stop_index}`;
+      if (!cur || cur.key !== key) {
+        cur = { key, via, name: p.product_name || 'Goods', stop: p.stop_index, boxes: [] };
+        steps.push(cur);
+      }
+      cur.boxes.push(p);
+    }
   }
 
-  // Per-stop unload view (what comes off at each stop)
+  // A one-line placement hint from the set's average position in the box.
+  // x_cm runs from the REAR doors (x=0) to the cab/front wall (x=length), so a
+  // high average x means deep/front; z_cm is the layer height (0 = floor).
+  const placeHint = (set) => {
+    const n = set.boxes.length;
+    const avgX = set.boxes.reduce((s, p) => s + p.x_cm + p.length_cm / 2, 0) / n;
+    const avgZ = set.boxes.reduce((s, p) => s + p.z_cm, 0) / n;
+    const depth = truck.length
+      ? (avgX >= truck.length * 0.6 ? 'at the FRONT (against the cab wall)'
+         : avgX <= truck.length * 0.34 ? 'near the DOORS'
+         : 'in the MIDDLE')
+      : 'in the truck';
+    const layer = (truck.height && avgZ >= truck.height * 0.28)
+      ? 'stacked on top of the boxes below'
+      : 'on the floor';
+    return `Put these ${depth}, ${layer}.`;
+  };
+
+  const doorBadge = (via) => via === 'side'
+    ? '<span class="door-tag door-side">SIDE door</span>'
+    : '<span class="door-tag door-rear">REAR doors</span>';
+  const doorWord = (via) => via === 'side' ? 'through the SIDE door' : 'through the REAR doors';
+
+  const totalBoxes = sorted.length;
+
+  const stepCards = steps.map((set, i) =>
+    `<div class="ls-step">
+       <div class="ls-step-num">${i + 1}</div>
+       <div class="ls-step-body">
+         <div class="ls-step-load"><span class="ls-qty">${set.boxes.length} ×</span> ${esc(set.name)}</div>
+         <div class="ls-step-meta">
+           <span class="ls-door">Load ${doorBadge(set.via)}</span>
+           <span class="ls-for">for ${esc(stopName(set.stop))}</span>
+         </div>
+         <div class="ls-step-where">${esc(placeHint(set))}</div>
+       </div>
+     </div>`).join('');
+
+  // Per-stop unload summary — what comes off first at each stop.
   const stopsSet = [...new Set(result.placements.map((p) => p.stop_index))].sort((a, b) => a - b);
-  const unloadView = stopsSet.map((si) => {
+  const unloadRows = stopsSet.map((si, idx) => {
     const count = result.placements.filter((p) => p.stop_index === si).length;
-    return `<h4>Stop ${si + 1} — ${count} item(s) come off</h4>`;
+    const first = idx === 0 ? ' <span class="ls-first">— these come off FIRST</span>' : '';
+    return `<li class="ls-unload-row"><strong>${esc(stopName(si))}</strong>: ${count} box(es) come off${first}</li>`;
   }).join('');
+
+  const tripName = (document.getElementById('trip-name').value || '').trim();
+  const truckSel = document.getElementById('truck-select');
+  const truckName = truckSel && truckSel.selectedOptions[0]
+    ? truckSel.selectedOptions[0].textContent : 'Truck';
+  const weightLine = s.total_weight_kg != null
+    ? `${esc(s.total_weight_kg)} kg${s.max_payload_kg ? ' / ' + esc(s.max_payload_kg) + ' kg max' : ''}` : '';
+
   document.getElementById('loadsheet').innerHTML =
-    `${loadSheetHtml}<h3>Unload order</h3>${unloadView}`;
+    `<div class="ls-sheet">
+       <div class="ls-header">
+         <div class="ls-title">LOADING INSTRUCTIONS</div>
+         <div class="ls-subtitle">
+           <span>${esc(truckName)}</span>
+           ${tripName ? `<span class="ls-dot">•</span><span>${esc(tripName)}</span>` : ''}
+         </div>
+         <div class="ls-totals">
+           <span class="ls-total"><strong>${totalBoxes}</strong> boxes to load</span>
+           ${weightLine ? `<span class="ls-total"><strong>${weightLine}</strong></span>` : ''}
+           <span class="ls-total"><strong>${steps.length}</strong> steps</span>
+         </div>
+       </div>
+
+       <div class="ls-blueprint">
+         <img id="print-blueprint" alt="3D loading blueprint of the packed truck" />
+       </div>
+
+       <div class="ls-instructions-title">Load in this exact order — start with Step 1</div>
+       <div class="ls-steps">${stepCards}</div>
+
+       <div class="ls-unload">
+         <div class="ls-unload-title">When you deliver — unload order</div>
+         <ul class="ls-unload-list">${unloadRows}</ul>
+       </div>
+     </div>`;
 
   renderBlueprint(result);
   window._lastResult = result;
@@ -392,10 +484,12 @@ function renderBlueprint(result) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d141d);
   const camera = new THREE.PerspectiveCamera(45, W / H, 1, 100000);
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   _threeRenderer = renderer;
   renderer.setSize(W, H);
   el.appendChild(renderer.domElement);
+  _activeCanvas = renderer.domElement; // for the beforeprint blueprint capture
+  installBeforePrintCapture();
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   const dir = new THREE.DirectionalLight(0xffffff, 0.6);
