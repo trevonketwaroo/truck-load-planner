@@ -526,9 +526,9 @@ function renderBlueprint(result) {
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
 
   // --- View presets: jump the camera and stop auto-rotate. ---
-  function setPreset(az, el, rad) {
+  function setPreset(az, elev, rad) {
     markInteracted();
-    azimuth = az; elevation = el; radius = clamp(rad, radiusMin, radiusMax);
+    azimuth = az; elevation = elev; radius = clamp(rad, radiusMin, radiusMax);
     applyCamera();
   }
   // Top = straight down; Side = from the left wall (z=0); Front = from the rear
