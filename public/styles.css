@@ -915,3 +915,14 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 
   #viewer { break-inside: avoid; }
 }
+
+/* ==========================================================================
+   Edit mode — toolbar + selected highlight (dark theme)
+   ========================================================================== */
+.edit-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px;
+  padding:8px 10px; background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.07);
+  border-radius:11px; }
+.edit-bar .grow { flex:1; }
+.edit-sel { font-size:13px; color:var(--muted, #8b97a7); }
+.edit-danger { color:#f87171 !important; border-color:rgba(248,113,113,0.3) !important; }
+.edit-hint { font-size:12px; color:#2dd4bf; margin:-4px 0 10px; }
