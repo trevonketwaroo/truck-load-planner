@@ -299,6 +299,7 @@ function renderBlueprint(result) {
   if (badge) badge.classList.remove('is-hidden'); // fresh render → show the hint again
 
   const onPointerDown = (e) => {
+    if (window.Editor && window.Editor.onPointerDown && window.Editor.onPointerDown(e)) return;
     dragging = true;
     if (!userInteracted) {
       userInteracted = true; // stop auto-rotate on first interaction
@@ -312,6 +313,7 @@ function renderBlueprint(result) {
     }
   };
   const onPointerMove = (e) => {
+    if (window.Editor && window.Editor.onPointerMove && window.Editor.onPointerMove(e)) return;
     if (!dragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
@@ -319,7 +321,8 @@ function renderBlueprint(result) {
     elevation = clamp(startEl - dy * 0.005, 0.15, 1.45);
     applyCamera();
   };
-  const stopDrag = () => {
+  const stopDrag = (e) => {
+    if (window.Editor && window.Editor.onPointerUp) window.Editor.onPointerUp(e);
     dragging = false;
     canvas.style.cursor = 'grab';
   };
@@ -329,9 +332,16 @@ function renderBlueprint(result) {
   canvas.addEventListener('pointerleave', stopDrag);
   canvas.addEventListener('pointercancel', stopDrag);
 
+  // Publish the live view so the editor can select/drag boxes against this scene.
+  window._view = {
+    scene, camera, renderer, boxMeshes: _boxMeshes,
+    truck, centre,
+    THREE,
+  };
+
   (function animate() {
     _animId = requestAnimationFrame(animate);
-    if (!userInteracted) {
+    if (!window._editActive && !userInteracted) {
       azimuth += 0.003; // slow auto-rotate until the user takes control
       applyCamera();
     }
@@ -473,6 +483,7 @@ function currentTruckDims() {
   const sideDoor = (t && t.side_door_x_cm !== null && t.side_door_x_cm !== undefined && t.side_door_x_cm !== '')
     ? +t.side_door_x_cm : null;
   return t
-    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm, side_door_x_cm: sideDoor }
-    : { length: 600, width: 240, height: 240, side_door_x_cm: null };
+    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm,
+        max_payload: +t.max_payload_kg, side_door_x_cm: sideDoor }
+    : { length: 600, width: 240, height: 240, max_payload: 0, side_door_x_cm: null };
 }
