@@ -251,6 +251,7 @@ module.exports = function loadPlannerRoutes(pool) {
         x_cm: Number(p.x_cm), y_cm: Number(p.y_cm), z_cm: Number(p.z_cm),
         length_cm: Number(p.length_cm), width_cm: Number(p.width_cm), height_cm: Number(p.height_cm),
         weight_kg: p.weight_kg === null || p.weight_kg === undefined ? null : Number(p.weight_kg),
+        color: p.color === undefined || p.color === null ? null : Number(p.color),
       })) : [];
 
       const check = Layout.validateLayout(placements, truck);

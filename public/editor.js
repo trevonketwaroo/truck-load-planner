@@ -9,6 +9,15 @@
   let groupSnapshot = null;   // [{box_id,x_cm,y_cm,z_cm}] group positions at drag start
   let restore = () => {};  // reassigned in Task 11 wiring below
 
+  // Context menu (right-click a box → details + recolor). A tasteful palette:
+  // the six stop colors plus a few extras, expressed as hex ints (Three.js color format).
+  const CTX_PALETTE = [
+    0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30, // stop colors
+    0x22d3ee, 0xf4c95d, 0xffffff, 0x8b97a7, // extras: teal accent, gold, white, slate
+  ];
+  let ctxMenuBoxId = null;      // box_id the open menu refers to
+  let ctxMenuBound = false;     // guard: document-level close listeners bound once
+
   const $ = (id) => document.getElementById(id);
   const meshById = (id) => (window._view.boxMeshes.find((m) => m.placement.box_id === id) || {}).mesh;
 
@@ -26,6 +35,7 @@
   function leave() {
     Editor.active = false; window._editActive = false;
     dragging = false; dragBox = null; select(null);
+    hideCtxMenu();
     $('edit-bar').style.display = 'none';
     $('edit-hint').style.display = 'none';
     $('edit-enter').style.display = '';
@@ -190,6 +200,91 @@
     primaryPre = null; groupSnapshot = null;
   };
 
+  // ── Context menu: right-click a box → details + recolor ──────────────────
+  Editor.onContextMenu = function (e) {
+    if (!Editor.active) { hideCtxMenu(); return; }
+    e.preventDefault();
+    const bm = pick(e);
+    if (!bm) { hideCtxMenu(); return; }
+    showCtxMenu(bm.placement.box_id, e.clientX, e.clientY);
+  };
+
+  function hideCtxMenu() {
+    const menu = $('ctx-menu');
+    if (menu) menu.style.display = 'none';
+    ctxMenuBoxId = null;
+  }
+
+  function showCtxMenu(boxId, clientX, clientY) {
+    const menu = $('ctx-menu');
+    if (!menu) return;
+    const p = working.find((w) => w.box_id === boxId);
+    if (!p) return;
+    ctxMenuBoxId = boxId;
+
+    const name = p.product_name || 'Box';
+    const count = working.filter((w) => w.product_name === p.product_name).length;
+    $('ctx-menu-title').textContent = name;
+    $('ctx-menu-sub').textContent = count + ' in this load';
+
+    // Swatch row — click applies that color to every placement of this product.
+    const swatchRow = $('ctx-menu-swatches');
+    swatchRow.innerHTML = '';
+    CTX_PALETTE.forEach((hex) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ctx-menu-swatch';
+      btn.style.background = '#' + hex.toString(16).padStart(6, '0');
+      btn.title = '#' + hex.toString(16).padStart(6, '0');
+      btn.addEventListener('click', () => recolorProduct(p.product_name, hex));
+      swatchRow.appendChild(btn);
+    });
+
+    // Native color picker — applies on change.
+    const colorInput = $('ctx-menu-color');
+    if (colorInput) {
+      colorInput.onchange = () => recolorProduct(p.product_name, parseInt(colorInput.value.slice(1), 16));
+    }
+
+    // Position near the cursor, relative to the .viewer-stage (menu's offset parent),
+    // clamped so it doesn't get clipped off the right/bottom edge.
+    const stage = menu.parentElement;
+    const stageRect = stage.getBoundingClientRect();
+    menu.style.display = 'block';
+    const menuW = menu.offsetWidth, menuH = menu.offsetHeight;
+    let left = clientX - stageRect.left + 8;
+    let top = clientY - stageRect.top + 8;
+    left = Math.min(left, stageRect.width - menuW - 6);
+    top = Math.min(top, stageRect.height - menuH - 6);
+    menu.style.left = Math.max(6, left) + 'px';
+    menu.style.top = Math.max(6, top) + 'px';
+
+    bindCtxMenuCloseListeners();
+  }
+
+  function recolorProduct(productName, hex) {
+    for (const p of working) if (p.product_name === productName) p.color = hex;
+    rebuildMeshes();
+    select(new Set(selected));
+    if (Editor._onLayoutChanged) Editor._onLayoutChanged();
+    hideCtxMenu();
+  }
+
+  // Close the menu on: click elsewhere, Esc, or scroll. Bound once (guarded)
+  // since the menu element persists across renders (unlike the canvas).
+  function bindCtxMenuCloseListeners() {
+    if (ctxMenuBound) return;
+    ctxMenuBound = true;
+    document.addEventListener('pointerdown', (e) => {
+      const menu = $('ctx-menu');
+      if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) hideCtxMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideCtxMenu();
+    });
+    window.addEventListener('scroll', hideCtxMenu, true);
+  }
+
   Editor._onLayoutChanged = function () {
     const t = window._view.truck;
     const truckVol = t.length * t.width * t.height;
@@ -290,6 +385,7 @@
       box_id: p.box_id, product_id: p.product_id, product_name: p.product_name,
       stop_index: p.stop_index, x_cm: p.x_cm, y_cm: p.y_cm, z_cm: p.z_cm,
       length_cm: p.length_cm, width_cm: p.width_cm, height_cm: p.height_cm, weight_kg: p.weight_kg,
+      color: p.color === undefined ? null : p.color,
     })) };
     const r = await window._saveLayout(body); // api PUT /layout, provided below
     if (r.error) { alert(r.error + (r.details ? '\n' + r.details.join('\n') : '')); return; }

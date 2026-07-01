@@ -980,3 +980,70 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 .edit-sel { font-size:13px; color:var(--muted, #8b97a7); }
 .edit-danger { color:#f87171 !important; border-color:rgba(248,113,113,0.3) !important; }
 .edit-hint { font-size:12px; color:#2dd4bf; margin:-4px 0 10px; }
+
+/* ---------- Box context menu (right-click: details + recolor) ---------- */
+.ctx-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  min-width: 188px;
+  padding: 12px 13px;
+  border-radius: var(--radius-sm);
+  background: rgba(13, 20, 29, 0.92);
+  backdrop-filter: saturate(170%) blur(10px);
+  -webkit-backdrop-filter: saturate(170%) blur(10px);
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  box-shadow: 0 0 26px -8px rgba(34, 211, 238, 0.45), 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+  user-select: none;
+}
+.ctx-menu-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-heading);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.ctx-menu-sub {
+  font-size: 12px;
+  color: #2dd4bf;
+  margin-bottom: 10px;
+}
+.ctx-menu-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ctx-menu-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.ctx-menu-swatch:hover { transform: scale(1.14); border-color: rgba(255, 255, 255, 0.5); }
+.ctx-menu-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.ctx-menu-custom input[type="color"] {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}

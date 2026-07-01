@@ -404,7 +404,7 @@ function renderBlueprint(result) {
   _boxMeshes = [];
   for (const p of result.placements) {
     const geo = new THREE.BoxGeometry(p.length_cm, p.height_cm, p.width_cm);
-    const color = STOP_COLORS[p.stop_index % STOP_COLORS.length];
+    const color = (p.color !== undefined && p.color !== null) ? p.color : STOP_COLORS[p.stop_index % STOP_COLORS.length];
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
     const finalY = p.z_cm + p.height_cm / 2;
     mesh.position.set(p.x_cm + p.length_cm / 2, finalY, p.y_cm + p.width_cm / 2);
@@ -481,6 +481,13 @@ function renderBlueprint(result) {
   canvas.addEventListener('pointerup', stopDrag);
   canvas.addEventListener('pointerleave', stopDrag);
   canvas.addEventListener('pointercancel', stopDrag);
+
+  // Right-click → box context menu (details + recolor). Separate from the
+  // pointerdown/move/up drag-select hooks above — doesn't interfere with them.
+  const onContextMenu = (e) => {
+    if (window.Editor && window.Editor.onContextMenu) window.Editor.onContextMenu(e);
+  };
+  canvas.addEventListener('contextmenu', onContextMenu);
 
   // Mark that the user has taken control → stop auto-rotate + drop the hint badge.
   function markInteracted() {
