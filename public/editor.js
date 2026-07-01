@@ -116,6 +116,8 @@
       const p = working.find((w) => selected.has(w.box_id));
       el.textContent = p ? (p.product_name || 'Box') : '—';
     } else { el.textContent = selected.size + ' boxes'; }
+    // Reveal the name label only on the selected box(es) (labels are off by default now).
+    if (window._setLabelSelection) window._setLabelSelection(selected);
   }
 
   // raycast helper: returns the boxMesh under the pointer, or null

@@ -179,7 +179,9 @@ const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30]
 let _threeRenderer = null, _animId = null;
 let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
 let _anims = [], _truckH = 240;
-let _labelsOn = true;                 // Labels toggle — default ON
+let _labelsOn = false;                // "Labels" toggle — default OFF (too cluttered on)
+let _labelSelection = new Set();      // box_ids whose label shows even when the toggle is off
+                                      // (driven by the editor selection: name shows on click)
 let _activeResize = null;             // resize fn for the current render's canvas
 let _installedGlobalListeners = false; // guard so window listeners attach once
 let _fullscreenBound = false;          // guard so the fullscreen button binds once
@@ -278,12 +280,20 @@ function buildLabels(scene, THREE, boxMeshes, maxDim) {
 
 function applyLabelVisibility(sprites) {
   for (const s of sprites) {
-    // follow both the global toggle and the owning box's visibility (walkthrough)
-    s.sprite.visible = _labelsOn && s.box.mesh.visible;
+    // Show a label when the box is visible (walkthrough) AND either the global toggle is on
+    // OR this box is selected — so by default the name only appears on the box you click.
+    const id = s.box.placement.box_id;
+    s.sprite.visible = s.box.mesh.visible && (_labelsOn || _labelSelection.has(id));
   }
   _activeLabelSprites = sprites;
 }
 let _activeLabelSprites = [];
+
+// The editor calls this on selection change so the clicked box(es) reveal their label.
+window._setLabelSelection = function (ids) {
+  _labelSelection = ids instanceof Set ? ids : new Set(ids || []);
+  if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
+};
 
 function renderStatsOnly(s) {
   document.getElementById('stats').innerHTML = `
