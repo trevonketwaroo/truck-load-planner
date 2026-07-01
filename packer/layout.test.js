@@ -19,3 +19,17 @@ test('withinTruck: inside is true, poking out is false', () => {
   assert.equal(Layout.withinTruck(box(0, 0, 0), truck), true);
   assert.equal(Layout.withinTruck(box(580, 0, 0), truck), false); // 580+40 > 600
 });
+
+test('supportHeightAt: empty floor => 0', () => {
+  assert.equal(Layout.supportHeightAt(box(0, 0, 0), []), 0);
+});
+test('supportHeightAt: over a 40-tall box => 40', () => {
+  const floorBox = box(0, 0, 0, 40, 40, 40);
+  const mover = box(10, 10, 999, 40, 40, 40); // z ignored by supportHeightAt
+  assert.equal(Layout.supportHeightAt(mover, [floorBox]), 40);
+});
+test('supportHeightAt: footprint not overlapping => 0', () => {
+  const floorBox = box(0, 0, 0, 40, 40, 40);
+  const mover = box(200, 200, 0, 40, 40, 40);
+  assert.equal(Layout.supportHeightAt(mover, [floorBox]), 0);
+});
