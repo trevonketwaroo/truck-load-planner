@@ -1,4 +1,8 @@
 'use strict';
+let packer = null;
+if (typeof module !== 'undefined' && module.exports) {
+  packer = require('./packer'); // Node only; browser uses geometry fns only
+}
 const Layout = {};
 
 // Two boxes overlap only if they interpenetrate on all three axes (touching = not overlap).
@@ -79,6 +83,30 @@ Layout.snapPosition = function (box, others, truck, threshold) {
     }
   }
   return null;
+};
+
+Layout.validateLayout = function (placements, truck) {
+  const errors = [];
+  for (const p of placements) {
+    if (!Layout.withinTruck(p, truck)) errors.push(`${p.box_id} out of bounds`);
+  }
+  for (let i = 0; i < placements.length; i++)
+    for (let j = i + 1; j < placements.length; j++)
+      if (Layout.boxesOverlap(placements[i], placements[j]))
+        errors.push(`${placements[i].box_id} overlaps ${placements[j].box_id}`);
+  return { ok: errors.length === 0, errors };
+};
+
+// Node-only: settle gravity, re-derive door/load order, compute stats. Reuses the packer.
+Layout.finalizeLayout = function (placements, truck) {
+  const pl = placements.map((p) => ({ ...p }));
+  packer.applyGravity(pl);
+  packer.applyDoorSequencing(pl, truck); // assigns load_via + load_order from positions
+  const boxes = pl.map((p) => ({ id: p.box_id, weight: Number(p.weight_kg) || 0 }));
+  // computeStats keys weight by box_id, so make placement.box_id match boxes[].id
+  const stats = packer.computeStats(
+    pl.map((p) => ({ ...p, box_id: p.box_id })), boxes, truck);
+  return { placements: pl, stats };
 };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Layout;

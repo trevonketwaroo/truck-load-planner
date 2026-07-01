@@ -65,3 +65,22 @@ test('snapPosition: never returns an overlapping position', () => {
   // must not interpenetrate base — either stacked above or nudged away
   assert.ok(!Layout.boxesOverlap(snapped, base));
 });
+
+test('validateLayout: flags overlaps', () => {
+  const r = Layout.validateLayout([box(0, 0, 0), box(20, 0, 0)], truck);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.length >= 1);
+});
+test('validateLayout: clean layout passes', () => {
+  const r = Layout.validateLayout([box(0, 0, 0), box(40, 0, 0)], truck);
+  assert.equal(r.ok, true);
+});
+test('finalizeLayout: returns load_order + stats, bottom loads first', () => {
+  const truckFull = { length: 600, width: 240, height: 240, max_payload: 5000, side_door_x_cm: null };
+  const placements = [box(0, 0, 0, 60, 40, 30), box(0, 0, 30, 60, 40, 30)]; // stacked
+  const out = Layout.finalizeLayout(placements, truckFull);
+  assert.equal(out.placements.length, 2);
+  const first = out.placements.find((p) => p.load_order === 1);
+  assert.equal(first.z_cm, 0); // bottom-first
+  assert.ok(out.stats.total_weight_kg === 20);
+});
