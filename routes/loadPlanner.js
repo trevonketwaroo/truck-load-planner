@@ -205,12 +205,14 @@ module.exports = function loadPlannerRoutes(pool) {
       const result = pack(input);
       result.unplaced = [...result.unplaced, ...orphanUnplaced];
       // Enrich each placement with the product it belongs to (box_id = "<trip_item_id>-<n>")
-      const itemMeta = Object.fromEntries(
-        validRows.map((it) => [String(it.id), { product_id: it.product_id, product_name: it.name }]));
+      const itemMeta = Object.fromEntries(validRows.map((it) => [String(it.id), {
+        product_id: it.product_id, product_name: it.name, weight_kg: it.weight_kg,
+      }]));
       result.placements.forEach((p) => {
         const meta = itemMeta[String(p.box_id).split('-')[0]];
         p.product_id = meta ? meta.product_id : null;
         p.product_name = meta ? meta.product_name : null;
+        p.weight_kg = meta ? Number(meta.weight_kg) : null;
       });
       await pool.query(
         `UPDATE trips SET packing_result=$1, status='packed' WHERE id=$2`,
