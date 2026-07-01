@@ -68,10 +68,13 @@ Layout.snapPosition = function (box, others, truck, threshold) {
   b.z_cm = Layout.supportHeightAt(b, rest);
   if (b.z_cm + b.height_cm > truck.height + 0.001) return null; // too tall to stack here
 
-  // 3. if that still overlaps something, spiral-search nearby footprints for a legal spot
+  // 3. if that still overlaps something, spiral-search nearby footprints for a legal spot.
+  // Step by half the box so adjacent test spots overlap-scan the box's own footprint; 6 rings
+  // (±3 box-widths in each direction) is ample for nudging one dragged box off its neighbors.
   if (!rest.some((o) => Layout.boxesOverlap(b, o))) return b;
   const step = Math.max(b.length_cm, b.width_cm) / 2;
-  for (let ring = 1; ring <= 6; ring++) {
+  const MAX_RINGS = 6;
+  for (let ring = 1; ring <= MAX_RINGS; ring++) {
     for (let dx = -ring; dx <= ring; dx++) {
       for (let dy = -ring; dy <= ring; dy++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
@@ -104,8 +107,7 @@ Layout.finalizeLayout = function (placements, truck) {
   packer.applyDoorSequencing(pl, truck); // assigns load_via + load_order from positions
   const boxes = pl.map((p) => ({ id: p.box_id, weight: Number(p.weight_kg) || 0 }));
   // computeStats keys weight by box_id, so make placement.box_id match boxes[].id
-  const stats = packer.computeStats(
-    pl.map((p) => ({ ...p, box_id: p.box_id })), boxes, truck);
+  const stats = packer.computeStats(pl, boxes, truck);
   return { placements: pl, stats };
 };
 
