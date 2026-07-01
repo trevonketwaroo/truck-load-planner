@@ -124,7 +124,7 @@
     const snapped = window.Layout.snapPosition(cand, others, window._view.truck, 5);
     if (!snapped) return; // won't fit rotated here
     Object.assign(p, { length_cm: p.width_cm, width_cm: p.length_cm, x_cm: snapped.x_cm, y_cm: snapped.y_cm, z_cm: snapped.z_cm });
-    rebuildMeshes(); Editor._onLayoutChanged();
+    rebuildMeshes(); select(selectedId); Editor._onLayoutChanged(); // re-apply the glow after rebuild
   }
 
   function deleteSelected() {
