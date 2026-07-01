@@ -117,7 +117,6 @@ orientations fit within truck bounds and `top_only` sacks are excluded. The box'
 needs careful LIFO analysis). (2) Heightmap approach: instead of uniform layerHeight, track
 actual available z at each (x,y) position so shorter rows don't block taller stacking.
 (3) Confirm real two-door geometry and fix the side/rear reachability rule from PR #1.
-=======
 ### 2026-06-29 — two-door rule fix + real geometry (PR #1 update)
 **Input from Trevon:** the main truck's left side door is **near the FRONT (cab end)**.
 **Fix:** found a coordinate-origin bug — `side_door_x_cm` is measured from the cab, but the
