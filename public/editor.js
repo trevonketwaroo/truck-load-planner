@@ -51,6 +51,24 @@
     return v.boxMeshes.find((m) => m.mesh === hit.object) || null;
   }
 
+  // raycast the pointer onto the floor plane (Three.Y = 0) → returns {x,z} in Three space
+  function floorPoint(e) {
+    const v = window._view, rect = v.renderer.domElement.getBoundingClientRect();
+    const ndc = new v.THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const ray = new v.THREE.Raycaster();
+    ray.setFromCamera(ndc, v.camera);
+    const plane = new v.THREE.Plane(new v.THREE.Vector3(0, 1, 0), 0);
+    const hit = new v.THREE.Vector3();
+    return ray.ray.intersectPlane(plane, hit) ? hit : null;
+  }
+
+  function applyToMesh(p) {
+    const mesh = meshById(p.box_id);
+    if (mesh) mesh.position.set(p.x_cm + p.length_cm / 2, p.z_cm + p.height_cm / 2, p.y_cm + p.width_cm / 2);
+  }
+
   Editor.onPointerDown = function (e) {
     if (!Editor.active) return false;
     const bm = pick(e);
@@ -59,7 +77,20 @@
     dragging = true; dragBox = bm.placement;
     return true; // we handled it — no orbit
   };
-  Editor.onPointerMove = function () { return dragging; };
+  Editor.onPointerMove = function (e) {
+    if (!dragging || !dragBox) return false;
+    const fp = floorPoint(e);
+    if (!fp) return true;
+    // Three.X = packer x (depth), Three.Z = packer y (width). Footprint centre → corner.
+    const raw = { ...dragBox, x_cm: fp.x - dragBox.length_cm / 2, y_cm: fp.z - dragBox.width_cm / 2 };
+    const others = working.filter((w) => w.box_id !== dragBox.box_id);
+    const snapped = window.Layout.snapPosition(raw, others, window._view.truck, 5);
+    if (!snapped) return true; // no legal spot — leave the box where it was
+    dragBox.x_cm = snapped.x_cm; dragBox.y_cm = snapped.y_cm; dragBox.z_cm = snapped.z_cm;
+    applyToMesh(dragBox);
+    if (window.Editor._onLayoutChanged) window.Editor._onLayoutChanged(); // live stats (Task 10)
+    return true;
+  };
   Editor.onPointerUp = function () { dragging = false; dragBox = null; };
 
   // wire buttons
