@@ -980,6 +980,11 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 .edit-sel { font-size:13px; color:var(--muted, #8b97a7); }
 .edit-danger { color:#f87171 !important; border-color:rgba(248,113,113,0.3) !important; }
 .edit-hint { font-size:12px; color:#2dd4bf; margin:-4px 0 10px; }
+#edit-undo.is-disabled, #edit-redo.is-disabled { opacity:0.4; cursor:not-allowed; pointer-events:none; }
+.edit-warn {
+  font-size:12px; font-weight:600; color:#fca5a5; background:rgba(248,113,113,0.12);
+  border:1px solid rgba(248,113,113,0.35); border-radius:999px; padding:3px 10px;
+}
 
 /* ---------- Box context menu (right-click: details + recolor) ---------- */
 .ctx-menu {

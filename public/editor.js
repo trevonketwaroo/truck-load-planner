@@ -18,6 +18,50 @@
   let ctxMenuBoxId = null;      // box_id the open menu refers to
   let ctxMenuBound = false;     // guard: document-level close listeners bound once
 
+  // ── Undo / redo ────────────────────────────────────────────────────────
+  // In-memory history of deep-cloned `working` snapshots. pushHistory() records
+  // the state BEFORE a mutating action starts (one entry per gesture, not per
+  // pointermove) and truncates any redo tail.
+  let history = [];
+  let histIndex = -1;
+
+  function pushHistory() {
+    history = history.slice(0, histIndex + 1);
+    history.push(JSON.parse(JSON.stringify(working)));
+    histIndex = history.length - 1;
+    updateHistoryButtons();
+  }
+
+  function resetHistory() {
+    history = [JSON.parse(JSON.stringify(working))];
+    histIndex = 0;
+    updateHistoryButtons();
+  }
+
+  function updateHistoryButtons() {
+    const undoBtn = $('edit-undo'), redoBtn = $('edit-redo');
+    const canUndo = histIndex > 0;
+    const canRedo = histIndex < history.length - 1;
+    if (undoBtn) { undoBtn.classList.toggle('is-disabled', !canUndo); undoBtn.disabled = !canUndo; }
+    if (redoBtn) { redoBtn.classList.toggle('is-disabled', !canRedo); redoBtn.disabled = !canRedo; }
+  }
+
+  function undo() {
+    if (histIndex <= 0) return;
+    histIndex--;
+    working = JSON.parse(JSON.stringify(history[histIndex]));
+    rebuildMeshes(); select(new Set(selected)); Editor._onLayoutChanged();
+    updateHistoryButtons();
+  }
+
+  function redo() {
+    if (histIndex >= history.length - 1) return;
+    histIndex++;
+    working = JSON.parse(JSON.stringify(history[histIndex]));
+    rebuildMeshes(); select(new Set(selected)); Editor._onLayoutChanged();
+    updateHistoryButtons();
+  }
+
   const $ = (id) => document.getElementById(id);
   const meshById = (id) => (window._view.boxMeshes.find((m) => m.placement.box_id === id) || {}).mesh;
 
@@ -26,10 +70,12 @@
     Editor.active = true; window._editActive = true;
     working = window._view.boxMeshes.map((m) => ({ ...m.placement }));
     preEdit = JSON.parse(JSON.stringify(working));
+    resetHistory();
     $('edit-bar').style.display = 'flex';
     $('edit-hint').style.display = 'block';
     $('edit-enter').style.display = 'none';
     select(null);
+    updateValidityCues();
   }
 
   function leave() {
@@ -134,6 +180,7 @@
       groupDrag = false;
     }
     dragging = true;
+    pushHistory(); // one undo step per drag gesture — record state BEFORE this drag moves anything
     // Snapshot pre-drag positions so we can reject/revert cleanly.
     primaryPre = { x_cm: dragBox.x_cm, y_cm: dragBox.y_cm, z_cm: dragBox.z_cm };
     groupSnapshot = working
@@ -263,6 +310,7 @@
   }
 
   function recolorProduct(productName, hex) {
+    pushHistory();
     for (const p of working) if (p.product_name === productName) p.color = hex;
     rebuildMeshes();
     select(new Set(selected));
@@ -302,10 +350,55 @@
       max_payload_kg: t.max_payload, balance_left_pct: pct(mL, lr), balance_right_pct: lr ? 100 - pct(mL, lr) : 0,
       balance_front_pct: pct(mF, fr), balance_rear_pct: fr ? 100 - pct(mF, fr) : 0, warnings: [],
     });
+    updateValidityCues();
   };
+
+  // ── Validity cue ─────────────────────────────────────────────────────────
+  // A box is invalid if it's out of truck bounds, overlaps another working box,
+  // or is unstable (supportArea < 0.6). Invalid boxes get a red edge outline
+  // child (distinct from the dark base outline and the cyan selection glow —
+  // selection's emissive tint still wins visually since it's on the material).
+  const SUPPORT_MIN = 0.6;
+  const INVALID_RED = 0xef4444;
+
+  function invalidOutline(mesh) {
+    let outline = mesh.userData._invalidOutline;
+    if (!outline) {
+      const v = window._view;
+      outline = new v.THREE.LineSegments(
+        new v.THREE.EdgesGeometry(mesh.geometry),
+        new v.THREE.LineBasicMaterial({ color: INVALID_RED, linewidth: 2 }));
+      outline.visible = false;
+      mesh.add(outline);
+      mesh.userData._invalidOutline = outline;
+    }
+    return outline;
+  }
+
+  function updateValidityCues() {
+    if (!window._view || !window._view.boxMeshes) return;
+    const truck = window._view.truck;
+    let invalidCount = 0;
+    for (const bm of window._view.boxMeshes) {
+      const p = bm.placement;
+      const others = working.filter((w) => w.box_id !== p.box_id);
+      const outOfBounds = !window.Layout.withinTruck(p, truck);
+      const overlapping = others.some((o) => window.Layout.boxesOverlap(p, o));
+      const unstable = window.Layout.supportArea(p, others) < SUPPORT_MIN;
+      const invalid = outOfBounds || overlapping || unstable;
+      if (invalid) invalidCount++;
+      if (bm.mesh) invalidOutline(bm.mesh).visible = invalid;
+    }
+    const warn = $('edit-warn');
+    if (warn) {
+      if (invalidCount > 0) { warn.textContent = '⚠ ' + invalidCount + ' unstable'; warn.style.display = ''; }
+      else { warn.style.display = 'none'; }
+    }
+  }
 
   function rotateSelected() {
     if (selected.size === 0) return;
+    pushHistory();
     const ids = working.filter((w) => selected.has(w.box_id)).map((w) => w.box_id);
     for (const id of ids) {
       const p = working.find((w) => w.box_id === id);
@@ -321,6 +414,7 @@
 
   function deleteSelected() {
     if (selected.size === 0) return;
+    pushHistory();
     working = working.filter((w) => !selected.has(w.box_id));
     select(null); rebuildMeshes(); Editor._onLayoutChanged();
   }
@@ -359,6 +453,7 @@
   async function reset() {
     const r = await window._packCurrentTrip(); // provided by load-planner (Task 11)
     working = r.placements.map((p) => ({ ...p }));
+    resetHistory();
     select(null); rebuildMeshes(); Editor._onLayoutChanged();
   }
 
@@ -373,6 +468,19 @@
     $('edit-reset').addEventListener('click', reset);
     $('edit-selrow').addEventListener('click', selectRow);
     $('edit-selproduct').addEventListener('click', selectProduct);
+    $('edit-undo').addEventListener('click', undo);
+    $('edit-redo').addEventListener('click', redo);
+  });
+
+  // Ctrl+Z = undo, Ctrl+Y / Ctrl+Shift+Z = redo — only while editing and not typing in a field.
+  window.addEventListener('keydown', (e) => {
+    if (!Editor.active) return;
+    const tag = (e.target && e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || (e.target && e.target.isContentEditable)) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const key = e.key.toLowerCase();
+    if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (key === 'y' || (key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
   });
 
   restore = function () {
@@ -389,6 +497,7 @@
     })) };
     const r = await window._saveLayout(body); // api PUT /layout, provided below
     if (r.error) { alert(r.error + (r.details ? '\n' + r.details.join('\n') : '')); return; }
+    resetHistory();
     leave();
     window.showResult(r);            // full re-render: blueprint + load sheet + walkthrough + stats
   }

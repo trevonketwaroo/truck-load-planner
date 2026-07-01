@@ -34,6 +34,26 @@ Layout.supportHeightAt = function (box, others) {
   return z;
 };
 
+// Fraction (0..1) of `box`'s footprint area resting on the floor (z_cm===0) or on the
+// tops of boxes directly beneath it (their top z ≈ box.z_cm within ~1cm, footprint
+// overlapping). Supported area = sum of footprint-intersection areas with those boxes,
+// clamped to the box's own footprint area, divided by the footprint area.
+Layout.supportArea = function (box, others) {
+  const footprintArea = box.length_cm * box.width_cm;
+  if (footprintArea <= 0) return 0;
+  if (Math.abs(box.z_cm) < 1) return 1; // resting on the floor
+
+  let covered = 0;
+  for (const o of others) {
+    if (o === box || o.box_id === box.box_id) continue;
+    if (Math.abs((o.z_cm + o.height_cm) - box.z_cm) > 1) continue; // not directly beneath
+    const xOverlap = Math.min(box.x_cm + box.length_cm, o.x_cm + o.length_cm) - Math.max(box.x_cm, o.x_cm);
+    const yOverlap = Math.min(box.y_cm + box.width_cm, o.y_cm + o.width_cm) - Math.max(box.y_cm, o.y_cm);
+    if (xOverlap > 0 && yOverlap > 0) covered += xOverlap * yOverlap;
+  }
+  return Math.min(covered, footprintArea) / footprintArea;
+};
+
 function clampFootprint(b, truck) {
   b.x_cm = Math.max(0, Math.min(truck.length - b.length_cm, b.x_cm));
   b.y_cm = Math.max(0, Math.min(truck.width - b.width_cm, b.y_cm));

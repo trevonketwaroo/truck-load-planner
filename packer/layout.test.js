@@ -75,6 +75,25 @@ test('validateLayout: clean layout passes', () => {
   const r = Layout.validateLayout([box(0, 0, 0), box(40, 0, 0)], truck);
   assert.equal(r.ok, true);
 });
+test('supportArea: floor box (z_cm===0) => 1', () => {
+  assert.equal(Layout.supportArea(box(0, 0, 0), []), 1);
+});
+test('supportArea: fully supported stack => ~1', () => {
+  const base = box(0, 0, 0, 40, 40, 40);
+  const top = box(0, 0, 40, 40, 40, 40); // exactly aligned above
+  assert.equal(Layout.supportArea(top, [base]), 1);
+});
+test('supportArea: half-overhanging box => ~0.5', () => {
+  const base = box(0, 0, 0, 40, 40, 40);
+  const top = box(20, 0, 40, 40, 40, 40); // shifted half its length off the base
+  assert.equal(Layout.supportArea(top, [base]), 0.5);
+});
+test('supportArea: unsupported/floating box => 0', () => {
+  const base = box(0, 0, 0, 40, 40, 40);
+  const floating = box(200, 200, 40, 40, 40, 40); // no footprint overlap with base
+  assert.equal(Layout.supportArea(floating, [base]), 0);
+});
+
 test('finalizeLayout: returns load_order + stats, bottom loads first', () => {
   const truckFull = { length: 600, width: 240, height: 240, max_payload: 5000, side_door_x_cm: null };
   const placements = [box(0, 0, 0, 60, 40, 30), box(0, 0, 30, 60, 40, 30)]; // stacked
