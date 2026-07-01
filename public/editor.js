@@ -75,7 +75,10 @@
     const bm = pick(e);
     if (!bm) { select(null); return false; } // let the camera orbit
     select(bm.placement.box_id);
-    dragging = true; dragBox = bm.placement;
+    // Drag the WORKING copy (what gets saved + collision-checked), not the mesh's own
+    // placement object — otherwise moves wouldn't persist and collision would use stale coords.
+    dragging = true;
+    dragBox = working.find((w) => w.box_id === bm.placement.box_id) || bm.placement;
     return true; // we handled it — no orbit
   };
   Editor.onPointerMove = function (e) {
