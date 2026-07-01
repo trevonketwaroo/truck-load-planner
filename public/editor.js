@@ -435,6 +435,21 @@
     select(ids);
   }
 
+  // Select the vertical COLUMN: every box whose footprint overlaps the reference's
+  // (the stack sitting above/below it), regardless of height.
+  function selectColumn() {
+    const ref = working.find((w) => selected.has(w.box_id));
+    if (!ref) return;
+    const ids = new Set();
+    for (const a of working) {
+      const footOverlap =
+        a.x_cm < ref.x_cm + ref.length_cm && a.x_cm + a.length_cm > ref.x_cm &&
+        a.y_cm < ref.y_cm + ref.width_cm && a.y_cm + a.width_cm > ref.y_cm;
+      if (footOverlap) ids.add(a.box_id);
+    }
+    select(ids);
+  }
+
   // Select every working box sharing the reference box's product_name.
   function selectProduct() {
     const ref = working.find((w) => selected.has(w.box_id));
@@ -469,6 +484,7 @@
     $('edit-delete').addEventListener('click', deleteSelected);
     $('edit-reset').addEventListener('click', reset);
     $('edit-selrow').addEventListener('click', selectRow);
+    if ($('edit-selcol')) $('edit-selcol').addEventListener('click', selectColumn);
     $('edit-selproduct').addEventListener('click', selectProduct);
     $('edit-undo').addEventListener('click', undo);
     $('edit-redo').addEventListener('click', redo);

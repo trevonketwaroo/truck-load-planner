@@ -537,6 +537,19 @@ details > .row { padding: 14px; }
 }
 #viewer canvas { display: block; border-radius: var(--radius); touch-action: none; }
 
+/* Fullscreen: the stage + viewer must fill the whole screen (the fixed 420px height
+   otherwise leaves the 3D covering only part of it). resizeViewer re-measures on change. */
+.viewer-stage:fullscreen,
+.viewer-stage:-webkit-full-screen {
+  width: 100vw; height: 100vh; border-radius: 0; background: #0a0f16;
+}
+.viewer-stage:fullscreen #viewer,
+.viewer-stage:-webkit-full-screen #viewer {
+  height: 100%; border-radius: 0;
+}
+.viewer-stage:fullscreen #viewer canvas,
+.viewer-stage:-webkit-full-screen #viewer canvas { border-radius: 0; }
+
 /* floating "drag to rotate" badge over the viewer — frosted dark pill */
 .viewer-badge {
   position: absolute;
