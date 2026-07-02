@@ -118,6 +118,7 @@ document.getElementById('new-trip').onclick = async () => {
   statusEl.className = 'trip-status is-success';
   statusEl.style.display = '';
   document.getElementById('trip-body').classList.remove('is-gated');
+  updateLights('Draft', 0);
   renderStops(); renderItems(); checkPackReady();
 };
 
@@ -210,6 +211,8 @@ document.getElementById('pack-btn').onclick = async () => {
 (async function init() {
   await loadTrucks();
   await loadProducts();
+  updateLights('Draft', 0);
+  document.getElementById('truck-select').addEventListener('change', () => updateLights());
   // Gate steps 3-5 until a trip is started
   document.getElementById('trip-body').classList.add('is-gated');
   // Show empty-state hints from the start
@@ -404,15 +407,46 @@ window._setLabelSelection = function (ids) {
   if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
 };
 
+// Telemetry gauges (right cockpit column). Same data as before, control-room look.
 function renderStatsOnly(s) {
+  const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+  const vol = clampPct(s.volume_used_pct);
+  const wPct = s.max_payload_kg > 0 ? Math.round((s.total_weight_kg / s.max_payload_kg) * 100) : 0;
+  const L = clampPct(s.balance_left_pct), F = clampPct(s.balance_front_pct);
   document.getElementById('stats').innerHTML = `
-    <span class="stat"><span class="stat-label">Space used</span><span class="stat-value">${s.volume_used_pct}%</span></span>
-    <span class="stat"><span class="stat-label">Weight</span><span class="stat-value">${s.total_weight_kg}<span class="stat-unit"> / ${s.max_payload_kg} kg</span></span></span>
-    <span class="stat"><span class="stat-label">Balance L / R</span><span class="stat-value">${s.balance_left_pct} / ${s.balance_right_pct}</span></span>
-    <span class="stat"><span class="stat-label">Front / Rear</span><span class="stat-value">${s.balance_front_pct} / ${s.balance_rear_pct}</span></span>
-    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}`;
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Space used</span><span class="g-v">${s.volume_used_pct}<small>%</small></span></div>
+      <div class="g-bar"><i style="width:${vol}%"></i></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Weight</span><span class="g-v">${s.total_weight_kg}<small> / ${s.max_payload_kg} kg</small></span></div>
+      <div class="g-bar ${wPct > 100 ? 'over' : 'green'}"><i style="width:${Math.min(100, wPct)}%"></i></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Balance L / R</span><span class="g-v">${s.balance_left_pct}<small> / ${s.balance_right_pct}</small></span></div>
+      <div class="g-split"><span class="a" style="width:${L}%">L</span><span class="b" style="width:${100 - L}%">R</span></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Front / Rear</span><span class="g-v">${s.balance_front_pct}<small> / ${s.balance_rear_pct}</small></span></div>
+      <div class="g-split"><span class="a" style="width:${F}%">F</span><span class="b" style="width:${100 - F}%">R</span></div>
+    </div>
+    ${(s.warnings || []).map((w) => `<div class="tele-warn">⚠ ${esc(w)}</div>`).join('')}`;
 }
 window.renderStatsOnly = renderStatsOnly;
+
+// Command-bar status lights.
+function updateLights(status, boxes) {
+  const st = document.getElementById('light-status-txt');
+  if (st && status) st.textContent = status;
+  const bx = document.getElementById('light-boxes');
+  if (bx && boxes !== undefined) bx.textContent = boxes;
+  const tEl = document.getElementById('light-truck');
+  if (tEl) {
+    const tId = +document.getElementById('truck-select').value;
+    const t = (state.trucks || []).find((x) => x.id === tId);
+    tEl.textContent = t ? t.name : '—';
+  }
+}
 
 // Group unplaced entries into "N× product — why" lines the crew/office can act on.
 const UNPLACED_REASON = {
@@ -435,13 +469,19 @@ function groupUnplaced(unplaced) {
 
 function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
+  const empty = document.getElementById('cockpit-empty');
+  if (empty) empty.style.display = 'none';
   const s = result.stats;
   renderStatsOnly(s);
+  updateLights('Packed', result.placements.length);
   const notLoaded = groupUnplaced(result.unplaced);
   if (notLoaded.length) {
     const total = notLoaded.reduce((n, g) => n + g.count, 0);
     document.getElementById('stats').insertAdjacentHTML('beforeend',
-      `<span class="stat stat-danger"><span class="stat-label">Not loaded</span><span class="stat-value">${total} box(es)</span></span>`);
+      `<div class="tele-danger">⚠ Not loaded: ${total} box(es)</div>`);
+  } else {
+    document.getElementById('stats').insertAdjacentHTML('beforeend',
+      '<div class="tele-ok">✓ All cargo aboard</div>');
   }
 
   // ===== WORKER-FRIENDLY LOADING INSTRUCTIONS =====
@@ -877,6 +917,15 @@ function setupWalkthrough(placements) {
   document.getElementById('wt-next').onclick = () =>
     setStep(_stepIndex >= _steps.length ? _steps.length : _stepIndex + 1, true);
   document.getElementById('wt-all').onclick = () => setStep(0, false);
+
+  // Timeline scrubber: one chip per load step — click to jump.
+  const track = document.getElementById('wt-chips');
+  if (track) {
+    track.innerHTML = _steps.map((s, i) =>
+      `<div class="tl-chip" data-step="${i + 1}" title="${esc(s.orders.length)}× ${esc(s.product_name)} → stop ${s.stop_index + 1}">${i + 1}</div>`).join('');
+    track.querySelectorAll('.tl-chip').forEach((c) =>
+      c.addEventListener('click', () => { const n = +c.dataset.step; setStep(n, n > _stepIndex); }));
+  }
   setStep(0, false);
 }
 
@@ -909,14 +958,21 @@ function setStep(n, animate) {
 function updateStepLabel() {
   const label = document.getElementById('wt-label');
   const detail = document.getElementById('wt-detail');
+  // keep the timeline chips in sync (done = loaded, current = this step)
+  const track = document.getElementById('wt-chips');
+  if (track) track.querySelectorAll('.tl-chip').forEach((c) => {
+    const n = +c.dataset.step;
+    c.classList.toggle('current', _stepIndex !== 0 && n === _stepIndex);
+    c.classList.toggle('done', _stepIndex !== 0 && n < _stepIndex);
+  });
   if (_stepIndex === 0) {
     label.textContent = `All ${_steps.length} steps`;
-    detail.textContent = 'Press Next to load set by set';
+    detail.textContent = 'Press ▶ or click a step number to load set by set';
     return;
   }
   const s = _steps[_stepIndex - 1];
   const doorLabel = s.via === 'side' ? 'SIDE door' : 'REAR doors';
-  label.textContent = `Step ${_stepIndex} of ${_steps.length}`;
+  label.textContent = `Step ${_stepIndex} / ${_steps.length}`;
   detail.textContent = `Through the ${doorLabel}: load ${s.orders.length}× ${s.product_name} → stop ${s.stop_index + 1}`;
 }
 
