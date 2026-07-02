@@ -157,76 +157,322 @@ document.getElementById('pack-btn').onclick = async () => {
   renderItems();
   // Initial readiness check (will set pack button disabled)
   checkPackReady();
+
+  // Deep-link: open the app with ?trip=<id> to jump straight to that trip's packed
+  // blueprint (ready to Edit) instead of rebuilding it by hand.
+  const tripParam = new URLSearchParams(location.search).get('trip');
+  if (tripParam) {
+    const trip = await api(`/trips/${tripParam}`);
+    if (trip && !trip.error) {
+      state.tripId = trip.id;
+      const sel = document.getElementById('truck-select');
+      if (trip.truck_id) sel.value = String(trip.truck_id);
+      if (trip.packing_result && trip.packing_result.placements) {
+        showResult(trip.packing_result);
+        document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }
 })();
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
 let _threeRenderer = null, _animId = null;
 let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
 let _anims = [], _truckH = 240;
+let _labelsOn = false;                // "Labels" toggle — default OFF (too cluttered on)
+let _labelSelection = new Set();      // box_ids whose label shows even when the toggle is off
+                                      // (driven by the editor selection: name shows on click)
+let _activeResize = null;             // resize fn for the current render's canvas
+let _activeCanvas = null;             // live renderer canvas for the print-blueprint capture
+let _installedGlobalListeners = false; // guard so window listeners attach once
+let _fullscreenBound = false;          // guard so the fullscreen button binds once
+let _beforePrintInstalled = false;     // guard so the beforeprint capture attaches once
 
-function showResult(result) {
-  document.getElementById('result-section').style.display = 'block';
-  const s = result.stats;
+// Capture the live WebGL canvas into the print-only <img id="print-blueprint">.
+// Requires the renderer to be created with preserveDrawingBuffer:true, otherwise
+// toDataURL() on a WebGL canvas comes back blank. Attached once (guarded); it
+// always reads `_activeCanvas`, which points at whichever render is current.
+function installBeforePrintCapture() {
+  if (_beforePrintInstalled) return;
+  const capture = () => {
+    const img = document.getElementById('print-blueprint');
+    if (!img || !_activeCanvas) return;
+    try {
+      // Force one render so the drawing buffer is fresh at capture time.
+      if (_threeRenderer && window._view) {
+        _threeRenderer.render(window._view.scene, window._view.camera);
+      }
+      img.src = _activeCanvas.toDataURL('image/png');
+      img.style.display = '';
+    } catch (_) { /* leave the previous src if capture fails */ }
+  };
+  window.addEventListener('beforeprint', capture);
+  // Safari / older browsers fire the print media query instead of beforeprint.
+  if (window.matchMedia) {
+    const mq = window.matchMedia('print');
+    const onChange = (e) => { if (e.matches) capture(); };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+  }
+  _beforePrintInstalled = true;
+}
+
+// Bind a viewer-control button by id. The button elements persist across
+// renders, so we replace the handler each render (no stacking of listeners).
+function bindViewerControl(id, handler) {
+  const btn = document.getElementById(id);
+  if (btn) btn.onclick = handler;
+}
+
+// Window-level resize + fullscreenchange listeners. The canvas is recreated on
+// every renderBlueprint call, so these delegate to `_activeResize`, which always
+// points at the live canvas. Installed once (guarded) to avoid duplicate stacking.
+function installGlobalViewerListeners() {
+  if (!_installedGlobalListeners) {
+    const onResize = () => { if (_activeResize) _activeResize(); };
+    window.addEventListener('resize', onResize);
+    document.addEventListener('fullscreenchange', onResize);
+    // give the browser a tick to settle fullscreen layout before re-measuring
+    document.addEventListener('fullscreenchange', () => setTimeout(onResize, 60));
+    _installedGlobalListeners = true;
+  }
+  // Fullscreen toggle button (persistent element) — bind once.
+  if (!_fullscreenBound) {
+    const fsBtn = document.getElementById('vc-fullscreen');
+    if (fsBtn) {
+      fsBtn.onclick = () => {
+        const stage = document.querySelector('.viewer-stage');
+        if (!stage) return;
+        if (!document.fullscreenElement) {
+          if (stage.requestFullscreen) stage.requestFullscreen();
+        } else if (document.exitFullscreen) {
+          document.exitFullscreen();
+        }
+      };
+      _fullscreenBound = true;
+    }
+  }
+}
+
+// Build one text sprite per box, above its top face. Textures are cached per
+// distinct product name (a handful of textures, not one per box). Sprites are
+// added straight to the scene (NOT to _boxMeshes) and given a no-op raycast so
+// they never interfere with the editor's box picking.
+function buildLabels(scene, THREE, boxMeshes, maxDim) {
+  const texCache = new Map();
+  const sprites = [];
+  const worldScale = Math.max(28, maxDim * 0.11); // readable constant world size
+
+  const textureFor = (name) => {
+    if (texCache.has(name)) return texCache.get(name);
+    const label = String(name || 'Goods');
+    const text = label.length > 10 ? label.slice(0, 9) + '…' : label;
+    const cw = 256, ch = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = cw; canvas.height = ch;
+    const ctx = canvas.getContext('2d');
+    const r = 22;
+    ctx.fillStyle = 'rgba(13,20,29,0.82)';
+    ctx.beginPath();
+    ctx.moveTo(r, 8); ctx.lineTo(cw - r, 8);
+    ctx.arcTo(cw - 8, 8, cw - 8, 8 + r, r); ctx.lineTo(cw - 8, ch - 8 - r);
+    ctx.arcTo(cw - 8, ch - 8, cw - 8 - r, ch - 8, r); ctx.lineTo(r, ch - 8);
+    ctx.arcTo(8, ch - 8, 8, ch - 8 - r, r); ctx.lineTo(8, 8 + r);
+    ctx.arcTo(8, 8, r, 8, r); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(45,212,191,0.55)';
+    ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = 'bold 46px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, cw / 2, ch / 2 + 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    texCache.set(name, tex);
+    return tex;
+  };
+
+  for (const b of boxMeshes) {
+    const name = b.placement.product_name;
+    const mat = new THREE.SpriteMaterial({ map: textureFor(name), transparent: true, depthTest: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(worldScale * 2, worldScale, 1); // texture is 2:1
+    const top = b.placement.z_cm + b.placement.height_cm;
+    sprite.position.set(
+      b.placement.x_cm + b.placement.length_cm / 2,
+      top + worldScale * 0.65,
+      b.placement.y_cm + b.placement.width_cm / 2);
+    sprite.raycast = () => {}; // no-op: never intercept editor picking
+    scene.add(sprite);
+    sprites.push({ sprite, box: b });
+  }
+  return sprites;
+}
+
+function applyLabelVisibility(sprites) {
+  for (const s of sprites) {
+    // Show a label when the box is visible (walkthrough) AND either the global toggle is on
+    // OR this box is selected — so by default the name only appears on the box you click.
+    const id = s.box.placement.box_id;
+    s.sprite.visible = s.box.mesh.visible && (_labelsOn || _labelSelection.has(id));
+  }
+  _activeLabelSprites = sprites;
+}
+let _activeLabelSprites = [];
+
+// The editor calls this on selection change so the clicked box(es) reveal their label.
+window._setLabelSelection = function (ids) {
+  _labelSelection = ids instanceof Set ? ids : new Set(ids || []);
+  if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
+};
+
+function renderStatsOnly(s) {
   document.getElementById('stats').innerHTML = `
     <span class="stat"><span class="stat-label">Space used</span><span class="stat-value">${s.volume_used_pct}%</span></span>
     <span class="stat"><span class="stat-label">Weight</span><span class="stat-value">${s.total_weight_kg}<span class="stat-unit"> / ${s.max_payload_kg} kg</span></span></span>
     <span class="stat"><span class="stat-label">Balance L / R</span><span class="stat-value">${s.balance_left_pct} / ${s.balance_right_pct}</span></span>
     <span class="stat"><span class="stat-label">Front / Rear</span><span class="stat-value">${s.balance_front_pct} / ${s.balance_rear_pct}</span></span>
-    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}
-    ${result.unplaced.length ? `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>` : ''}`;
+    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}`;
+}
+window.renderStatsOnly = renderStatsOnly;
 
-  // Load order as a human list: group boxes into sets (same door + product + stop)
-  // in load order. "Load 14× Milk for stop 1", etc. — what the crew needs.
-  // The load sheet is grouped by DOOR first (side door loaded first, then rear),
-  // then by load order within each door group.
-  const sorted = [...result.placements].sort((a, b) => a.load_order - b.load_order);
-  const hasSide = sorted.some((p) => p.load_via === 'side');
-  const buildSets = (rows) => {
-    const sets = [];
-    let cur = null;
-    for (const p of rows) {
-      const key = `${p.product_name || 'Goods'}|${p.stop_index}`;
-      if (!cur || cur.key !== key) {
-        cur = { key, name: p.product_name || 'Goods', stop: p.stop_index, n: 0 };
-        sets.push(cur);
-      }
-      cur.n++;
-    }
-    return sets;
-  };
-  const setsTable = (sets) =>
-    `<table class="loadsheet-table"><thead><tr><th>#</th><th>Load</th><th>For</th></tr></thead><tbody>${
-      sets.map((s, i) =>
-        `<tr><td>${i + 1}</td><td><strong>${s.n}×</strong> ${esc(s.name)}</td><td>Stop ${s.stop + 1}</td></tr>`
-      ).join('')}</tbody></table>`;
-
-  let loadSheetHtml;
-  if (hasSide) {
-    const sideSets = buildSets(sorted.filter((p) => p.load_via === 'side'));
-    const rearSets = buildSets(sorted.filter((p) => p.load_via === 'rear'));
-    loadSheetHtml =
-      `<h3>Load in this order (first item goes deepest)</h3>
-       <h4>1. Through the <span class="door-tag door-side">SIDE door</span> (loaded first, then close it)</h4>
-       ${sideSets.length ? setsTable(sideSets) : '<p class="muted">Nothing loads through the side door.</p>'}
-       <h4>2. Through the <span class="door-tag door-rear">REAR doors</span></h4>
-       ${rearSets.length ? setsTable(rearSets) : '<p class="muted">Nothing loads through the rear doors.</p>'}`;
-  } else {
-    loadSheetHtml =
-      `<h3>Load in this order (first item goes deepest)</h3>
-       ${setsTable(buildSets(sorted))}`;
+function showResult(result) {
+  document.getElementById('result-section').style.display = 'block';
+  const s = result.stats;
+  renderStatsOnly(s);
+  if (result.unplaced && result.unplaced.length) {
+    document.getElementById('stats').insertAdjacentHTML('beforeend',
+      `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>`);
   }
 
-  // Per-stop unload view (what comes off at each stop)
+  // ===== WORKER-FRIENDLY LOADING INSTRUCTIONS =====
+  // Rebuild the load sheet as big numbered steps a crew can follow without
+  // supervision. We reuse the SAME grouping the on-screen walkthrough uses:
+  // consecutive placements with the same load_via + product_name + stop_index,
+  // in load order (first set goes in deepest / loads first).
+  const sorted = [...result.placements].sort((a, b) => a.load_order - b.load_order);
+  const truck = currentTruckDims();
+
+  // Stop labels come from the trip form (state.stops). On a deep-link load the
+  // form may be empty, so fall back to "Stop N".
+  const stopName = (si) => {
+    const lbl = state.stops && state.stops[si] && (state.stops[si].label || '').trim();
+    return lbl ? `Stop ${si + 1} — ${lbl}` : `Stop ${si + 1}`;
+  };
+
+  // Group into loading sets (identical to setupWalkthrough's grouping).
+  const steps = [];
+  {
+    let cur = null;
+    for (const p of sorted) {
+      const via = p.load_via || 'rear';
+      const key = `${via}|${p.product_name || 'Goods'}|${p.stop_index}`;
+      if (!cur || cur.key !== key) {
+        cur = { key, via, name: p.product_name || 'Goods', stop: p.stop_index, boxes: [] };
+        steps.push(cur);
+      }
+      cur.boxes.push(p);
+    }
+  }
+
+  // A one-line placement hint from the set's average position in the box.
+  // x_cm runs from the REAR doors (x=0) to the cab/front wall (x=length), so a
+  // high average x means deep/front; z_cm is the layer height (0 = floor).
+  const placeHint = (set) => {
+    const n = set.boxes.length;
+    const avgX = set.boxes.reduce((s, p) => s + p.x_cm + p.length_cm / 2, 0) / n;
+    const avgZ = set.boxes.reduce((s, p) => s + p.z_cm, 0) / n;
+    const depth = truck.length
+      ? (avgX >= truck.length * 0.6 ? 'at the FRONT (against the cab wall)'
+         : avgX <= truck.length * 0.34 ? 'near the DOORS'
+         : 'in the MIDDLE')
+      : 'in the truck';
+    const layer = (truck.height && avgZ >= truck.height * 0.28)
+      ? 'stacked on top of the boxes below'
+      : 'on the floor';
+    return `Put these ${depth}, ${layer}.`;
+  };
+
+  const doorBadge = (via) => via === 'side'
+    ? '<span class="door-tag door-side">SIDE door</span>'
+    : '<span class="door-tag door-rear">REAR doors</span>';
+  const doorWord = (via) => via === 'side' ? 'through the SIDE door' : 'through the REAR doors';
+
+  const totalBoxes = sorted.length;
+
+  const stepCards = steps.map((set, i) =>
+    `<div class="ls-step">
+       <div class="ls-step-num">${i + 1}</div>
+       <div class="ls-step-body">
+         <div class="ls-step-load"><span class="ls-qty">${set.boxes.length} ×</span> ${esc(set.name)}</div>
+         <div class="ls-step-meta">
+           <span class="ls-door">Load ${doorBadge(set.via)}</span>
+           <span class="ls-for">for ${esc(stopName(set.stop))}</span>
+         </div>
+         <div class="ls-step-where">${esc(placeHint(set))}</div>
+       </div>
+     </div>`).join('');
+
+  // Per-stop unload summary — what comes off first at each stop.
   const stopsSet = [...new Set(result.placements.map((p) => p.stop_index))].sort((a, b) => a - b);
-  const unloadView = stopsSet.map((si) => {
+  const unloadRows = stopsSet.map((si, idx) => {
     const count = result.placements.filter((p) => p.stop_index === si).length;
-    return `<h4>Stop ${si + 1} — ${count} item(s) come off</h4>`;
+    const first = idx === 0 ? ' <span class="ls-first">— these come off FIRST</span>' : '';
+    return `<li class="ls-unload-row"><strong>${esc(stopName(si))}</strong>: ${count} box(es) come off${first}</li>`;
   }).join('');
+
+  const tripName = (document.getElementById('trip-name').value || '').trim();
+  const truckSel = document.getElementById('truck-select');
+  const truckName = truckSel && truckSel.selectedOptions[0]
+    ? truckSel.selectedOptions[0].textContent : 'Truck';
+  const weightLine = s.total_weight_kg != null
+    ? `${esc(s.total_weight_kg)} kg${s.max_payload_kg ? ' / ' + esc(s.max_payload_kg) + ' kg max' : ''}` : '';
+
   document.getElementById('loadsheet').innerHTML =
-    `${loadSheetHtml}<h3>Unload order</h3>${unloadView}`;
+    `<div class="ls-sheet">
+       <div class="ls-header">
+         <div class="ls-title">LOADING INSTRUCTIONS</div>
+         <div class="ls-subtitle">
+           <span>${esc(truckName)}</span>
+           ${tripName ? `<span class="ls-dot">•</span><span>${esc(tripName)}</span>` : ''}
+         </div>
+         <div class="ls-totals">
+           <span class="ls-total"><strong>${totalBoxes}</strong> boxes to load</span>
+           ${weightLine ? `<span class="ls-total"><strong>${weightLine}</strong></span>` : ''}
+           <span class="ls-total"><strong>${steps.length}</strong> steps</span>
+         </div>
+       </div>
+
+       <div class="ls-blueprint">
+         <img id="print-blueprint" alt="3D loading blueprint of the packed truck" />
+       </div>
+
+       <div class="ls-instructions-title">Load in this exact order — start with Step 1</div>
+       <div class="ls-steps">${stepCards}</div>
+
+       <div class="ls-unload">
+         <div class="ls-unload-title">When you deliver — unload order</div>
+         <ul class="ls-unload-list">${unloadRows}</ul>
+       </div>
+     </div>`;
 
   renderBlueprint(result);
+  window._lastResult = result;
 }
+
+window._lastResult = null;
+window._rerenderEditing = function (placements) {
+  // re-render the 3D from an in-progress edited layout WITHOUT recomputing order/stats
+  renderBlueprint({ placements, stats: window._lastResult.stats, unplaced: [] });
+  window._editActive = true; // stay in edit mode after a rebuild
+};
+window._packCurrentTrip = function () {
+  return api(`/trips/${state.tripId}/pack`, { method: 'POST' });
+};
+window._saveLayout = function (body) {
+  return api(`/trips/${state.tripId}/layout`, { method: 'PUT', body: JSON.stringify(body) });
+};
+window.showResult = showResult; // expose for the editor's Save
 
 function renderBlueprint(result) {
   if (_animId) cancelAnimationFrame(_animId);
@@ -238,10 +484,12 @@ function renderBlueprint(result) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0d141d);
   const camera = new THREE.PerspectiveCamera(45, W / H, 1, 100000);
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   _threeRenderer = renderer;
   renderer.setSize(W, H);
   el.appendChild(renderer.domElement);
+  _activeCanvas = renderer.domElement; // for the beforeprint blueprint capture
+  installBeforePrintCapture();
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   const dir = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -260,7 +508,7 @@ function renderBlueprint(result) {
   _boxMeshes = [];
   for (const p of result.placements) {
     const geo = new THREE.BoxGeometry(p.length_cm, p.height_cm, p.width_cm);
-    const color = STOP_COLORS[p.stop_index % STOP_COLORS.length];
+    const color = (p.color !== undefined && p.color !== null) ? p.color : STOP_COLORS[p.stop_index % STOP_COLORS.length];
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
     const finalY = p.z_cm + p.height_cm / 2;
     mesh.position.set(p.x_cm + p.length_cm / 2, finalY, p.y_cm + p.width_cm / 2);
@@ -274,11 +522,17 @@ function renderBlueprint(result) {
   // --- Orbit camera via spherical coords around the truck centre ---
   const maxDim = Math.max(truck.length, truck.width, truck.height);
   const centre = new THREE.Vector3(truck.length / 2, truck.height / 2, truck.width / 2);
-  const radius = maxDim * 1.9; // matches the previous framing distance
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  // Zoom bounds keyed to truck size so wheel/pinch can't lose the load.
+  const radiusMin = maxDim * 0.6;
+  const radiusMax = maxDim * 4;
+  // Default framing sits a touch closer than before so the boxes read bigger.
+  const DEFAULT_RADIUS = maxDim * 1.55;
+  let radius = DEFAULT_RADIUS;
   // Spherical: azimuth around Y, elevation from the horizontal plane.
-  let azimuth = 0;        // starts looking along +x/+z like the old orbit
-  let elevation = 0.8;    // a comfortable raised viewing angle
+  const DEFAULT_AZIMUTH = 0, DEFAULT_ELEVATION = 0.8;
+  let azimuth = DEFAULT_AZIMUTH; // starts looking along +x/+z like the old orbit
+  let elevation = DEFAULT_ELEVATION; // a comfortable raised viewing angle
   let userInteracted = false;
   let dragging = false;
   let startX = 0, startY = 0, startAz = 0, startEl = 0;
@@ -299,6 +553,7 @@ function renderBlueprint(result) {
   if (badge) badge.classList.remove('is-hidden'); // fresh render → show the hint again
 
   const onPointerDown = (e) => {
+    if (window.Editor && window.Editor.onPointerDown && window.Editor.onPointerDown(e)) return;
     dragging = true;
     if (!userInteracted) {
       userInteracted = true; // stop auto-rotate on first interaction
@@ -312,6 +567,7 @@ function renderBlueprint(result) {
     }
   };
   const onPointerMove = (e) => {
+    if (window.Editor && window.Editor.onPointerMove && window.Editor.onPointerMove(e)) return;
     if (!dragging) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
@@ -319,7 +575,8 @@ function renderBlueprint(result) {
     elevation = clamp(startEl - dy * 0.005, 0.15, 1.45);
     applyCamera();
   };
-  const stopDrag = () => {
+  const stopDrag = (e) => {
+    if (window.Editor && window.Editor.onPointerUp) window.Editor.onPointerUp(e);
     dragging = false;
     canvas.style.cursor = 'grab';
   };
@@ -329,9 +586,111 @@ function renderBlueprint(result) {
   canvas.addEventListener('pointerleave', stopDrag);
   canvas.addEventListener('pointercancel', stopDrag);
 
+  // Right-click → box context menu (details + recolor). Separate from the
+  // pointerdown/move/up drag-select hooks above — doesn't interfere with them.
+  const onContextMenu = (e) => {
+    if (window.Editor && window.Editor.onContextMenu) window.Editor.onContextMenu(e);
+  };
+  canvas.addEventListener('contextmenu', onContextMenu);
+
+  // Mark that the user has taken control → stop auto-rotate + drop the hint badge.
+  function markInteracted() {
+    if (!userInteracted) {
+      userInteracted = true;
+      if (badge) badge.classList.add('is-hidden');
+    }
+  }
+
+  // --- Zoom: mouse wheel adjusts radius (clamped to the truck-sized bounds) ---
+  // The canvas is recreated each render, so attaching here binds the fresh canvas.
+  const onWheel = (e) => {
+    e.preventDefault();
+    markInteracted();
+    const factor = Math.exp(e.deltaY * 0.0012); // smooth multiplicative zoom
+    radius = clamp(radius * factor, radiusMin, radiusMax);
+    applyCamera();
+  };
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+
+  // --- Touch pinch-zoom (two fingers) ---
+  let pinchStartDist = 0, pinchStartRadius = radius;
+  const touchDist = (t) => {
+    const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+  const onTouchStart = (e) => {
+    if (e.touches.length === 2) {
+      pinchStartDist = touchDist(e.touches);
+      pinchStartRadius = radius;
+    }
+  };
+  const onTouchMove = (e) => {
+    if (e.touches.length === 2 && pinchStartDist > 0) {
+      e.preventDefault();
+      markInteracted();
+      const d = touchDist(e.touches);
+      radius = clamp(pinchStartRadius * (pinchStartDist / d), radiusMin, radiusMax);
+      applyCamera();
+    }
+  };
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+
+  // --- View presets: jump the camera and stop auto-rotate. ---
+  function setPreset(az, elev, rad) {
+    markInteracted();
+    azimuth = az; elevation = elev; radius = clamp(rad, radiusMin, radiusMax);
+    applyCamera();
+  }
+  // Top = straight down; Side = from the left wall (z=0); Front = from the rear
+  // doors (packer x=0); Reset = the default raised 3-quarter view.
+  const presetHandlers = {
+    top:   () => setPreset(0, 1.45, maxDim * 1.7),
+    side:  () => setPreset(-Math.PI / 2, 0.28, maxDim * 1.7),
+    front: () => setPreset(Math.PI, 0.28, maxDim * 1.7),
+    reset: () => setPreset(DEFAULT_AZIMUTH, DEFAULT_ELEVATION, DEFAULT_RADIUS),
+  };
+  bindViewerControl('vc-top', presetHandlers.top);
+  bindViewerControl('vc-side', presetHandlers.side);
+  bindViewerControl('vc-front', presetHandlers.front);
+  bindViewerControl('vc-reset', presetHandlers.reset);
+
+  // --- Labels: one cached texture per distinct product, shown above each box ---
+  const labelSprites = buildLabels(scene, THREE, _boxMeshes, maxDim);
+  applyLabelVisibility(labelSprites);
+  bindViewerControl('vc-labels', () => {
+    _labelsOn = !_labelsOn;
+    const btn = document.getElementById('vc-labels');
+    if (btn) { btn.classList.toggle('is-active', _labelsOn); btn.setAttribute('aria-pressed', String(_labelsOn)); }
+    applyLabelVisibility(labelSprites);
+  });
+  // reflect current toggle state on the (persistent) button each render
+  const labelsBtn = document.getElementById('vc-labels');
+  if (labelsBtn) { labelsBtn.classList.toggle('is-active', _labelsOn); labelsBtn.setAttribute('aria-pressed', String(_labelsOn)); }
+
+  // --- Resize / fullscreen: keep renderer + camera aspect matched to the stage ---
+  function resizeViewer() {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  // Expose the current render's resize so the once-installed global listeners
+  // (added below) can drive whichever canvas is live.
+  _activeResize = resizeViewer;
+  installGlobalViewerListeners();
+
+  // Publish the live view so the editor can select/drag boxes against this scene.
+  window._view = {
+    scene, camera, renderer, boxMeshes: _boxMeshes,
+    truck, centre,
+    THREE,
+  };
+
   (function animate() {
     _animId = requestAnimationFrame(animate);
-    if (!userInteracted) {
+    if (!window._editActive && !userInteracted) {
       azimuth += 0.003; // slow auto-rotate until the user takes control
       applyCamera();
     }
@@ -426,6 +785,7 @@ function setStep(n, animate) {
     b.mesh.material.emissive.setHex(isCurrent ? 0x2a2a00 : 0x000000);
     if (visible) b.mesh.position.y = b.finalY; // default at rest
   }
+  if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
   // animate the just-revealed set dropping into place
   if (animate && goingForward && n >= 1) {
     const setBoxes = _boxMeshes.filter((b) => b.step === n).sort((a, c) => a.order - c.order);
@@ -473,6 +833,7 @@ function currentTruckDims() {
   const sideDoor = (t && t.side_door_x_cm !== null && t.side_door_x_cm !== undefined && t.side_door_x_cm !== '')
     ? +t.side_door_x_cm : null;
   return t
-    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm, side_door_x_cm: sideDoor }
-    : { length: 600, width: 240, height: 240, side_door_x_cm: null };
+    ? { length: +t.cargo_length_cm, width: +t.cargo_width_cm, height: +t.cargo_height_cm,
+        max_payload: +t.max_payload_kg, side_door_x_cm: sideDoor }
+    : { length: 600, width: 240, height: 240, max_payload: 0, side_door_x_cm: null };
 }

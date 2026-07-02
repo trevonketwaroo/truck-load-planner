@@ -6,6 +6,7 @@
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test packer/**/*.test.js",
+    "sync-layout": "node -e \"require('fs').copyFileSync('packer/layout.js','public/layout.js')\"",
     "copy-products": "node copy-products.js"
   },
   "dependencies": {

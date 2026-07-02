@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const { pack } = require('../packer/packer');
+const Layout = require('../packer/layout');
 
 module.exports = function loadPlannerRoutes(pool) {
   const router = express.Router();
@@ -205,12 +206,14 @@ module.exports = function loadPlannerRoutes(pool) {
       const result = pack(input);
       result.unplaced = [...result.unplaced, ...orphanUnplaced];
       // Enrich each placement with the product it belongs to (box_id = "<trip_item_id>-<n>")
-      const itemMeta = Object.fromEntries(
-        validRows.map((it) => [String(it.id), { product_id: it.product_id, product_name: it.name }]));
+      const itemMeta = Object.fromEntries(validRows.map((it) => [String(it.id), {
+        product_id: it.product_id, product_name: it.name, weight_kg: it.weight_kg,
+      }]));
       result.placements.forEach((p) => {
         const meta = itemMeta[String(p.box_id).split('-')[0]];
         p.product_id = meta ? meta.product_id : null;
         p.product_name = meta ? meta.product_name : null;
+        p.weight_kg = meta ? Number(meta.weight_kg) : null;
       });
       await pool.query(
         `UPDATE trips SET packing_result=$1, status='packed' WHERE id=$2`,
@@ -219,6 +222,51 @@ module.exports = function loadPlannerRoutes(pool) {
     } catch (e) {
       console.error('[pack]', e);
       res.status(500).json({ error: 'Failed to pack trip' });
+    }
+  });
+
+  // ===== SAVE A HAND-EDITED LAYOUT =====
+  router.put('/trips/:id/layout', async (req, res) => {
+    try {
+      const tripId = req.params.id;
+      const trip = await pool.query('SELECT * FROM trips WHERE id=$1', [tripId]);
+      if (!trip.rows[0]) return res.status(404).json({ error: 'Trip not found' });
+      if (!trip.rows[0].truck_id) return res.status(400).json({ error: 'Trip has no truck' });
+      const t = await pool.query('SELECT * FROM trucks WHERE id=$1', [trip.rows[0].truck_id]);
+      if (!t.rows[0]) return res.status(400).json({ error: 'Truck not found' });
+
+      const truck = {
+        length: Number(t.rows[0].cargo_length_cm),
+        width: Number(t.rows[0].cargo_width_cm),
+        height: Number(t.rows[0].cargo_height_cm),
+        max_payload: Number(t.rows[0].max_payload_kg),
+        side_door_x_cm: t.rows[0].side_door_x_cm === null ? null : Number(t.rows[0].side_door_x_cm),
+      };
+
+      const placements = Array.isArray(req.body.placements) ? req.body.placements.map((p) => ({
+        box_id: String(p.box_id),
+        product_id: p.product_id ?? null,
+        product_name: p.product_name ?? null,
+        stop_index: Number(p.stop_index) || 0,
+        x_cm: Number(p.x_cm), y_cm: Number(p.y_cm), z_cm: Number(p.z_cm),
+        length_cm: Number(p.length_cm), width_cm: Number(p.width_cm), height_cm: Number(p.height_cm),
+        weight_kg: p.weight_kg === null || p.weight_kg === undefined ? null : Number(p.weight_kg),
+        color: p.color === undefined || p.color === null ? null : Number(p.color),
+      })) : [];
+
+      const check = Layout.validateLayout(placements, truck);
+      if (!check.ok) return res.status(400).json({ error: 'Invalid layout', details: check.errors });
+
+      const result = Layout.finalizeLayout(placements, truck);
+      result.unplaced = [];
+      result.manual = true;
+      await pool.query(
+        `UPDATE trips SET packing_result=$1, status='packed' WHERE id=$2`,
+        [JSON.stringify(result), tripId]);
+      res.json(result);
+    } catch (e) {
+      console.error('[layout]', e);
+      res.status(500).json({ error: 'Failed to save layout' });
     }
   });
 

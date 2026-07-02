@@ -537,6 +537,19 @@ details > .row { padding: 14px; }
 }
 #viewer canvas { display: block; border-radius: var(--radius); touch-action: none; }
 
+/* Fullscreen: the stage + viewer must fill the whole screen (the fixed 420px height
+   otherwise leaves the 3D covering only part of it). resizeViewer re-measures on change. */
+.viewer-stage:fullscreen,
+.viewer-stage:-webkit-full-screen {
+  width: 100vw; height: 100vh; border-radius: 0; background: #0a0f16;
+}
+.viewer-stage:fullscreen #viewer,
+.viewer-stage:-webkit-full-screen #viewer {
+  height: 100%; border-radius: 0;
+}
+.viewer-stage:fullscreen #viewer canvas,
+.viewer-stage:-webkit-full-screen #viewer canvas { border-radius: 0; }
+
 /* floating "drag to rotate" badge over the viewer — frosted dark pill */
 .viewer-badge {
   position: absolute;
@@ -566,6 +579,59 @@ details > .row { padding: 14px; }
   opacity: 0;
   transform: translateX(-50%) translateY(8px);
 }
+
+/* floating control cluster top-right of the 3D stage — glassy dark chips */
+.viewer-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  z-index: 3;
+  user-select: none;
+}
+.vc-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(13, 20, 29, 0.72);
+  backdrop-filter: saturate(170%) blur(8px);
+  -webkit-backdrop-filter: saturate(170%) blur(8px);
+  border: 1px solid rgba(45, 212, 191, 0.28);
+  box-shadow: 0 8px 22px -12px rgba(0, 0, 0, 0.8);
+}
+.vc-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 5px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.vc-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--text-heading); }
+.vc-btn:active { background: rgba(255, 255, 255, 0.12); }
+.vc-btn.vc-icon { font-size: 15px; padding: 4px 10px; }
+.vc-btn.is-active {
+  background: var(--accent-grad);
+  color: #04222a;
+  box-shadow: 0 0 14px -3px rgba(34, 211, 238, 0.6);
+}
+.vc-btn.is-active:hover { color: #04222a; }
+@media (max-width: 640px) {
+  .viewer-controls { top: 8px; right: 8px; gap: 6px; }
+  .vc-btn { font-size: 11px; padding: 4px 9px; }
+}
+/* (print rules for .viewer-controls are consolidated into the main @media print
+   block near the bottom of this file.) */
 
 /* ---------- Load sheet ---------- */
 #loadsheet { margin-top: 18px; }
@@ -618,6 +684,119 @@ details > .row { padding: 14px; }
 }
 #loadsheet table tr:last-child td { border-bottom: none; }
 #loadsheet table tr:nth-child(even) td { background: rgba(255, 255, 255, 0.025); }
+
+/* ---------- Loading instructions (worker-friendly load sheet) ---------- */
+.ls-sheet { margin-top: 6px; }
+
+.ls-header { margin-bottom: 14px; }
+.ls-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: var(--text-heading);
+}
+.ls-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ls-subtitle .ls-dot { color: var(--text-faint); }
+.ls-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+.ls-total {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text);
+}
+.ls-total strong { color: var(--text-heading); font-weight: 800; }
+
+/* Blueprint image: hidden on screen (the live 3D viewer above already shows it);
+   revealed and enlarged for print. */
+.ls-blueprint { display: none; }
+#print-blueprint { display: none; }
+
+.ls-instructions-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text-heading);
+  margin: 18px 0 12px;
+  letter-spacing: 0.01em;
+}
+
+.ls-steps { display: flex; flex-direction: column; gap: 12px; }
+.ls-step {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+.ls-step-num {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  min-height: 46px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #14b8a6, #22d3ee);
+  color: #06181b;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+.ls-step-body { flex: 1 1 auto; min-width: 0; }
+.ls-step-load {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-heading);
+  line-height: 1.2;
+}
+.ls-step-load .ls-qty { color: var(--accent-hover); font-weight: 900; }
+.ls-step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ls-step-where {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.ls-unload {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.ls-unload-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--text-heading);
+  margin-bottom: 8px;
+}
+.ls-unload-list { margin: 0; padding-left: 22px; }
+.ls-unload-row { font-size: 15px; margin: 4px 0; color: var(--text); }
+.ls-first { color: var(--warning); font-weight: 800; }
 
 .print-btn { margin-top: 18px; }
 
@@ -886,7 +1065,23 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   section:hover, .card:hover, .table-card:hover { transform: none; box-shadow: none; }
   .app-header, .app-footer, #walkthrough,
   .print-btn, .add-row, .step-actions, details,
-  .viewer-badge { display: none !important; }
+  .viewer-badge, .viewer-controls,
+  /* Hide the live 3D viewer + its interactive chrome — the captured
+     #print-blueprint image replaces it on paper. */
+  .viewer-stage, #viewer, #stats,
+  #edit-bar, .edit-bar, #edit-hint, .edit-hint,
+  #edit-enter, .card-head button, .ctx-menu,
+  /* Only the load-planner page has these; hide everything above the sheet. */
+  #truck-section, #result-section > .card-head { display: none !important; }
+
+  /* The result section carries the whole printed sheet — strip its card chrome. */
+  #result-section {
+    border: none !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
 
   .page-title, .page-sub,
   #loadsheet h3, #loadsheet h4, #loadsheet .muted,
@@ -913,5 +1108,150 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   .door-tag.door-side { background: #d8f3ee !important; color: #0b6f66 !important; }
   .door-tag.door-rear { background: #fbeccc !important; color: #b8730f !important; }
 
-  #viewer { break-inside: avoid; }
+  /* ----- Loading instructions on paper: black-on-white, big & legible ----- */
+  .ls-sheet { color: #000 !important; }
+  .ls-title { font-size: 26pt !important; color: #000 !important; }
+  .ls-subtitle { font-size: 14pt !important; color: #000 !important; }
+  .ls-totals { gap: 8px !important; }
+  .ls-total {
+    background: #fff !important;
+    border: 1px solid #000 !important;
+    color: #000 !important;
+    font-size: 12pt !important;
+  }
+  .ls-total strong { color: #000 !important; }
+
+  /* Show the captured blueprint image prominently at the top of the sheet. */
+  .ls-blueprint { display: block !important; break-inside: avoid; margin: 8px 0 6px; text-align: center; }
+  #print-blueprint {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 4.2in !important;
+    object-fit: contain;
+    border: 1px solid #000 !important;
+    border-radius: 4px;
+    background: #fff !important;
+  }
+
+  .ls-instructions-title,
+  .ls-unload-title { font-size: 15pt !important; font-weight: 900 !important; color: #000 !important; }
+
+  .ls-steps { gap: 10px !important; }
+  .ls-step {
+    background: #fff !important;
+    border: 2px solid #000 !important;
+    border-radius: 6px;
+    break-inside: avoid;   /* never split a step across pages */
+    page-break-inside: avoid;
+    padding: 10px 12px !important;
+  }
+  .ls-step-num {
+    background: #000 !important;
+    color: #fff !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    font-size: 22pt !important;
+    border-radius: 8px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .ls-step-load { font-size: 16pt !important; color: #000 !important; }
+  .ls-step-load .ls-qty { color: #000 !important; }
+  .ls-step-meta { font-size: 12pt !important; color: #000 !important; }
+  .ls-step-where { font-size: 11pt !important; color: #222 !important; }
+
+  .ls-unload { break-inside: avoid; }
+  .ls-unload-row { font-size: 12pt !important; color: #000 !important; }
+  .ls-first { color: #000 !important; font-weight: 900 !important; text-decoration: underline; }
+
+  /* Keep door badges filled so they read on a black-and-white printer too. */
+  .door-tag {
+    border: 1px solid #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* ==========================================================================
+   Edit mode — toolbar + selected highlight (dark theme)
+   ========================================================================== */
+.edit-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px;
+  padding:8px 10px; background:rgba(255,255,255,0.035); border:1px solid rgba(255,255,255,0.07);
+  border-radius:11px; }
+.edit-bar .grow { flex:1; }
+.edit-sel { font-size:13px; color:var(--muted, #8b97a7); }
+.edit-danger { color:#f87171 !important; border-color:rgba(248,113,113,0.3) !important; }
+.edit-hint { font-size:12px; color:#2dd4bf; margin:-4px 0 10px; }
+#edit-undo.is-disabled, #edit-redo.is-disabled { opacity:0.4; cursor:not-allowed; pointer-events:none; }
+.edit-warn {
+  font-size:12px; font-weight:600; color:#fca5a5; background:rgba(248,113,113,0.12);
+  border:1px solid rgba(248,113,113,0.35); border-radius:999px; padding:3px 10px;
+}
+
+/* ---------- Box context menu (right-click: details + recolor) ---------- */
+.ctx-menu {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  min-width: 188px;
+  padding: 12px 13px;
+  border-radius: var(--radius-sm);
+  background: rgba(13, 20, 29, 0.92);
+  backdrop-filter: saturate(170%) blur(10px);
+  -webkit-backdrop-filter: saturate(170%) blur(10px);
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  box-shadow: 0 0 26px -8px rgba(34, 211, 238, 0.45), 0 18px 40px -18px rgba(0, 0, 0, 0.85);
+  user-select: none;
+}
+.ctx-menu-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--text-heading);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.ctx-menu-sub {
+  font-size: 12px;
+  color: #2dd4bf;
+  margin-bottom: 10px;
+}
+.ctx-menu-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ctx-menu-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.ctx-menu-swatch:hover { transform: scale(1.14); border-color: rgba(255, 255, 255, 0.5); }
+.ctx-menu-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.ctx-menu-custom input[type="color"] {
+  width: 30px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
 }
