@@ -215,6 +215,14 @@ module.exports = function loadPlannerRoutes(pool) {
         p.product_name = meta ? meta.product_name : null;
         p.weight_kg = meta ? Number(meta.weight_kg) : null;
       });
+      // Name unplaced entries too, so the crew can see WHAT didn't make it.
+      // box_id is "<trip_item_id>-<n>" for expanded boxes, "item-<trip_item_id>"
+      // for whole items rejected before expansion (unmeasured / zero qty / orphaned).
+      const allItemNames = Object.fromEntries(items.rows.map((it) => [String(it.id), it.name]));
+      result.unplaced.forEach((u) => {
+        const itemId = String(u.box_id).replace(/^item-/, '').split('-')[0];
+        u.product_name = allItemNames[itemId] || null;
+      });
       await pool.query(
         `UPDATE trips SET packing_result=$1, status='packed' WHERE id=$2`,
         [JSON.stringify(result), tripId]);

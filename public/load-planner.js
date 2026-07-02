@@ -36,6 +36,65 @@ async function loadProducts() {
   state.products = await api('/products');
 }
 
+// ===== Recent trips: reopen, duplicate as a template, delete =====
+async function loadTrips() {
+  const trips = await api('/trips');
+  if (!Array.isArray(trips)) return;
+  const section = document.getElementById('trips-section');
+  const list = document.getElementById('trip-list');
+  if (!trips.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  const truckName = (id) => {
+    const t = (state.trucks || []).find((x) => x.id === id);
+    return t ? t.name : '—';
+  };
+  const fmtDate = (d) => {
+    const dt = new Date(d);
+    return isNaN(dt) ? '' : dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  };
+  list.innerHTML = trips.slice(0, 8).map((t) => `
+    <div class="trip-row">
+      <div class="trip-row-main">
+        <span class="trip-row-name">${esc(t.name)}</span>
+        <span class="trip-row-meta">${esc(fmtDate(t.created_at))} · ${esc(truckName(t.truck_id))}</span>
+      </div>
+      <span class="trip-badge ${t.status === 'packed' ? 'trip-badge--packed' : ''}">${t.status === 'packed' ? 'Packed' : 'Draft'}</span>
+      <button class="btn-ghost" onclick="openTrip(${esc(t.id)})">Open</button>
+      <button class="btn-ghost" onclick="duplicateTrip(${esc(t.id)})" title="Start a new trip with the same stops and items">Duplicate</button>
+      <button class="btn-ghost trip-del" onclick="deleteTrip(${esc(t.id)})" title="Delete this trip">✕</button>
+    </div>`).join('');
+}
+
+window.openTrip = (id) => { location.href = '/?trip=' + id; };
+
+window.duplicateTrip = async (id) => {
+  const src = await api(`/trips/${id}`);
+  if (!src || src.error) { alert('Could not load that trip'); return; }
+  const copy = await api('/trips', { method: 'POST', body: JSON.stringify({
+    name: (src.name || 'Trip') + ' (copy)',
+    truck_id: src.truck_id,
+    priority_preset: src.priority_preset,
+  }) });
+  if (copy.error) { alert(copy.error); return; }
+  const savedStops = await api(`/trips/${copy.id}/stops`, { method: 'PUT', body: JSON.stringify({
+    stops: (src.stops || []).map((s) => ({ label: s.label, lat: s.lat, lng: s.lng, type: s.type })),
+  }) });
+  const stopIdxById = Object.fromEntries((src.stops || []).map((s, i) => [s.id, i]));
+  const items = (src.items || []).map((it) => ({
+    stop_id: (savedStops[stopIdxById[it.stop_id]] || {}).id,
+    product_id: it.product_id,
+    quantity: it.quantity,
+  })).filter((it) => it.stop_id);
+  await api(`/trips/${copy.id}/items`, { method: 'PUT', body: JSON.stringify({ items }) });
+  location.href = '/?trip=' + copy.id;
+};
+
+window.deleteTrip = async (id) => {
+  if (!confirm('Delete this trip? This cannot be undone.')) return;
+  await api(`/trips/${id}`, { method: 'DELETE' });
+  await loadTrips();
+};
+
 document.getElementById('new-trip').onclick = async () => {
   const truckSel = document.getElementById('truck-select');
   const statusEl = document.getElementById('trip-status');
@@ -59,6 +118,7 @@ document.getElementById('new-trip').onclick = async () => {
   statusEl.className = 'trip-status is-success';
   statusEl.style.display = '';
   document.getElementById('trip-body').classList.remove('is-gated');
+  updateLights('Draft', 0);
   renderStops(); renderItems(); checkPackReady();
 };
 
@@ -145,11 +205,14 @@ document.getElementById('pack-btn').onclick = async () => {
   if (result.error) { alert(result.error); return; }
   showResult(result);
   document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+  loadTrips(); // refresh the Recent trips badges (draft → packed)
 };
 
 (async function init() {
   await loadTrucks();
   await loadProducts();
+  updateLights('Draft', 0);
+  document.getElementById('truck-select').addEventListener('change', () => updateLights());
   // Gate steps 3-5 until a trip is started
   document.getElementById('trip-body').classList.add('is-gated');
   // Show empty-state hints from the start
@@ -158,8 +221,11 @@ document.getElementById('pack-btn').onclick = async () => {
   // Initial readiness check (will set pack button disabled)
   checkPackReady();
 
-  // Deep-link: open the app with ?trip=<id> to jump straight to that trip's packed
-  // blueprint (ready to Edit) instead of rebuilding it by hand.
+  await loadTrips();
+
+  // Deep-link: open the app with ?trip=<id> to jump straight to that trip — the
+  // whole form (name, preset, stops, items) is hydrated so the trip is editable
+  // and the load sheet shows the real stop names, then the packed blueprint shows.
   const tripParam = new URLSearchParams(location.search).get('trip');
   if (tripParam) {
     const trip = await api(`/trips/${tripParam}`);
@@ -167,6 +233,21 @@ document.getElementById('pack-btn').onclick = async () => {
       state.tripId = trip.id;
       const sel = document.getElementById('truck-select');
       if (trip.truck_id) sel.value = String(trip.truck_id);
+      document.getElementById('trip-name').value = trip.name || '';
+      if (trip.priority_preset) document.getElementById('preset').value = trip.priority_preset;
+      state.stops = (trip.stops || []).map((s) => ({ label: s.label || '' }));
+      const stopIdxById = Object.fromEntries((trip.stops || []).map((s, i) => [s.id, i]));
+      state.items = (trip.items || []).map((it) => ({
+        stopIdx: stopIdxById[it.stop_id] ?? 0,
+        product_id: it.product_id,
+        quantity: it.quantity,
+      }));
+      document.getElementById('trip-body').classList.remove('is-gated');
+      const statusEl = document.getElementById('trip-status');
+      statusEl.textContent = `✓ Reopened "${trip.name || 'Trip'}" — edit below or re-pack.`;
+      statusEl.className = 'trip-status is-success';
+      statusEl.style.display = '';
+      renderStops(); renderItems(); checkPackReady();
       if (trip.packing_result && trip.packing_result.placements) {
         showResult(trip.packing_result);
         document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
@@ -326,23 +407,81 @@ window._setLabelSelection = function (ids) {
   if (_activeLabelSprites && _activeLabelSprites.length) applyLabelVisibility(_activeLabelSprites);
 };
 
+// Telemetry gauges (right cockpit column). Same data as before, control-room look.
 function renderStatsOnly(s) {
+  const clampPct = (v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0)));
+  const vol = clampPct(s.volume_used_pct);
+  const wPct = s.max_payload_kg > 0 ? Math.round((s.total_weight_kg / s.max_payload_kg) * 100) : 0;
+  const L = clampPct(s.balance_left_pct), F = clampPct(s.balance_front_pct);
   document.getElementById('stats').innerHTML = `
-    <span class="stat"><span class="stat-label">Space used</span><span class="stat-value">${s.volume_used_pct}%</span></span>
-    <span class="stat"><span class="stat-label">Weight</span><span class="stat-value">${s.total_weight_kg}<span class="stat-unit"> / ${s.max_payload_kg} kg</span></span></span>
-    <span class="stat"><span class="stat-label">Balance L / R</span><span class="stat-value">${s.balance_left_pct} / ${s.balance_right_pct}</span></span>
-    <span class="stat"><span class="stat-label">Front / Rear</span><span class="stat-value">${s.balance_front_pct} / ${s.balance_rear_pct}</span></span>
-    ${(s.warnings || []).map((w) => `<span class="stat stat-warn"><span class="stat-label">Warning</span><span class="stat-value">${esc(w)}</span></span>`).join('')}`;
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Space used</span><span class="g-v">${s.volume_used_pct}<small>%</small></span></div>
+      <div class="g-bar"><i style="width:${vol}%"></i></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Weight</span><span class="g-v">${s.total_weight_kg}<small> / ${s.max_payload_kg} kg</small></span></div>
+      <div class="g-bar ${wPct > 100 ? 'over' : 'green'}"><i style="width:${Math.min(100, wPct)}%"></i></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Balance L / R</span><span class="g-v">${s.balance_left_pct}<small> / ${s.balance_right_pct}</small></span></div>
+      <div class="g-split"><span class="a" style="width:${L}%">L</span><span class="b" style="width:${100 - L}%">R</span></div>
+    </div>
+    <div class="gauge">
+      <div class="g-head"><span class="g-k">Front / Rear</span><span class="g-v">${s.balance_front_pct}<small> / ${s.balance_rear_pct}</small></span></div>
+      <div class="g-split"><span class="a" style="width:${F}%">F</span><span class="b" style="width:${100 - F}%">R</span></div>
+    </div>
+    ${(s.warnings || []).map((w) => `<div class="tele-warn">⚠ ${esc(w)}</div>`).join('')}`;
 }
 window.renderStatsOnly = renderStatsOnly;
 
+// Command-bar status lights.
+function updateLights(status, boxes) {
+  const st = document.getElementById('light-status-txt');
+  if (st && status) st.textContent = status;
+  const bx = document.getElementById('light-boxes');
+  if (bx && boxes !== undefined) bx.textContent = boxes;
+  const tEl = document.getElementById('light-truck');
+  if (tEl) {
+    const tId = +document.getElementById('truck-select').value;
+    const t = (state.trucks || []).find((x) => x.id === tId);
+    tEl.textContent = t ? t.name : '—';
+  }
+}
+
+// Group unplaced entries into "N× product — why" lines the crew/office can act on.
+const UNPLACED_REASON = {
+  unmeasured: 'no size saved — add it on the Products page',
+  no_space: 'no room left in the truck',
+  over_weight: 'over the truck weight limit',
+  zero_quantity: 'quantity was zero',
+  orphaned_stop: 'its stop was removed',
+};
+function groupUnplaced(unplaced) {
+  const groups = new Map();
+  for (const u of unplaced || []) {
+    const name = u.product_name || 'Unknown item';
+    const key = `${name}|${u.reason}`;
+    if (!groups.has(key)) groups.set(key, { name, reason: u.reason, count: 0 });
+    groups.get(key).count++;
+  }
+  return [...groups.values()];
+}
+
 function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
+  const empty = document.getElementById('cockpit-empty');
+  if (empty) empty.style.display = 'none';
   const s = result.stats;
   renderStatsOnly(s);
-  if (result.unplaced && result.unplaced.length) {
+  updateLights('Packed', result.placements.length);
+  const notLoaded = groupUnplaced(result.unplaced);
+  if (notLoaded.length) {
+    const total = notLoaded.reduce((n, g) => n + g.count, 0);
     document.getElementById('stats').insertAdjacentHTML('beforeend',
-      `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>`);
+      `<div class="tele-danger">⚠ Not loaded: ${total} box(es)</div>`);
+  } else {
+    document.getElementById('stats').insertAdjacentHTML('beforeend',
+      '<div class="tele-ok">✓ All cargo aboard</div>');
   }
 
   // ===== WORKER-FRIENDLY LOADING INSTRUCTIONS =====
@@ -446,6 +585,14 @@ function showResult(result) {
        <div class="ls-blueprint">
          <img id="print-blueprint" alt="3D loading blueprint of the packed truck" />
        </div>
+
+       ${notLoaded.length ? `
+       <div class="ls-notloaded">
+         <div class="ls-notloaded-title">⚠ NOT LOADED — tell the office before leaving</div>
+         <ul class="ls-notloaded-list">
+           ${notLoaded.map((g) => `<li><strong>${g.count}× ${esc(g.name)}</strong> — ${esc(UNPLACED_REASON[g.reason] || g.reason)}</li>`).join('')}
+         </ul>
+       </div>` : ''}
 
        <div class="ls-instructions-title">Load in this exact order — start with Step 1</div>
        <div class="ls-steps">${stepCards}</div>
@@ -770,6 +917,15 @@ function setupWalkthrough(placements) {
   document.getElementById('wt-next').onclick = () =>
     setStep(_stepIndex >= _steps.length ? _steps.length : _stepIndex + 1, true);
   document.getElementById('wt-all').onclick = () => setStep(0, false);
+
+  // Timeline scrubber: one chip per load step — click to jump.
+  const track = document.getElementById('wt-chips');
+  if (track) {
+    track.innerHTML = _steps.map((s, i) =>
+      `<div class="tl-chip" data-step="${i + 1}" title="${esc(s.orders.length)}× ${esc(s.product_name)} → stop ${s.stop_index + 1}">${i + 1}</div>`).join('');
+    track.querySelectorAll('.tl-chip').forEach((c) =>
+      c.addEventListener('click', () => { const n = +c.dataset.step; setStep(n, n > _stepIndex); }));
+  }
   setStep(0, false);
 }
 
@@ -802,14 +958,21 @@ function setStep(n, animate) {
 function updateStepLabel() {
   const label = document.getElementById('wt-label');
   const detail = document.getElementById('wt-detail');
+  // keep the timeline chips in sync (done = loaded, current = this step)
+  const track = document.getElementById('wt-chips');
+  if (track) track.querySelectorAll('.tl-chip').forEach((c) => {
+    const n = +c.dataset.step;
+    c.classList.toggle('current', _stepIndex !== 0 && n === _stepIndex);
+    c.classList.toggle('done', _stepIndex !== 0 && n < _stepIndex);
+  });
   if (_stepIndex === 0) {
     label.textContent = `All ${_steps.length} steps`;
-    detail.textContent = 'Press Next to load set by set';
+    detail.textContent = 'Press ▶ or click a step number to load set by set';
     return;
   }
   const s = _steps[_stepIndex - 1];
   const doorLabel = s.via === 'side' ? 'SIDE door' : 'REAR doors';
-  label.textContent = `Step ${_stepIndex} of ${_steps.length}`;
+  label.textContent = `Step ${_stepIndex} / ${_steps.length}`;
   detail.textContent = `Through the ${doorLabel}: load ${s.orders.length}× ${s.product_name} → stop ${s.stop_index + 1}`;
 }
 

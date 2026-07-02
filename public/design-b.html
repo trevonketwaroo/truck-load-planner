@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design B — Cargo Cockpit · Truck Load Planner</title>
+  <style>
+    :root {
+      --bg: #0a0c0e;
+      --panel: #101418;
+      --panel-2: #151a1f;
+      --border: #232a31;
+      --border-strong: #323b44;
+      --text: #d7dde3;
+      --heading: #f2f5f8;
+      --muted: #7d8894;
+      --amber: #f59e0b;
+      --amber-soft: rgba(245, 158, 11, 0.12);
+      --green: #22c55e;
+      --green-soft: rgba(34, 197, 94, 0.12);
+      --red: #ef4444;
+      --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13.5px;
+      line-height: 1.45;
+    }
+    .preview-banner {
+      background: #1c1206;
+      border-bottom: 1px solid #4a3208;
+      color: #fcd34d;
+      font-size: 12.5px;
+      padding: 7px 16px;
+      display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+    }
+    .preview-banner strong { color: #fde68a; }
+    .preview-banner a { color: #93c5fd; font-weight: 700; text-decoration: none; }
+    .preview-banner .grow { flex: 1; }
+
+    /* ── Command bar ── */
+    .cmdbar {
+      display: flex; align-items: center; gap: 16px;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    .cmdbar .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 14px; letter-spacing: 0.04em;
+      color: var(--heading); text-transform: uppercase;
+    }
+    .cmdbar .brand .logo {
+      width: 30px; height: 30px; border-radius: 6px;
+      background: var(--amber); color: #1c1206;
+      display: grid; place-items: center;
+    }
+    .cmdbar .brand .logo svg { width: 17px; height: 17px; }
+    .trip-select {
+      display: flex; align-items: center; gap: 9px;
+      background: var(--panel-2); border: 1px solid var(--border-strong);
+      border-radius: 7px; padding: 7px 13px; cursor: pointer;
+      font-weight: 700; color: var(--heading); font-size: 13px;
+    }
+    .trip-select .caret { color: var(--muted); font-size: 10px; }
+    .cmdbar .grow { flex: 1; }
+    .light { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; }
+    .light i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .light.amber i { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+    .light b { color: var(--text); font-family: var(--mono); font-weight: 700; }
+
+    /* ── Cockpit grid ── */
+    .cockpit {
+      display: grid;
+      grid-template-columns: 300px 1fr 292px;
+      gap: 1px;
+      background: var(--border);
+      height: calc(100vh - 88px);
+      min-height: 540px;
+    }
+    .col { background: var(--bg); overflow-y: auto; }
+    .panel { background: var(--panel); border-bottom: 1px solid var(--border); }
+    .panel-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px;
+      font-size: 11px; font-weight: 800; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer; user-select: none;
+    }
+    .panel-head .grow { flex: 1; }
+    .panel-head .count { font-family: var(--mono); color: var(--amber); }
+    .panel-body { padding: 12px 14px; }
+    .panel.collapsed .panel-body { display: none; }
+
+    .kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+    .kv .k { color: var(--muted); }
+    .kv .v { font-family: var(--mono); color: var(--heading); font-weight: 600; }
+
+    .stop-line { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+    .stop-line .dot { width: 22px; height: 22px; border-radius: 5px; flex: 0 0 auto; display: grid; place-items: center; font-size: 11px; font-weight: 800; font-family: var(--mono); color: #0a0c0e; }
+    .stop-line .nm { font-weight: 700; color: var(--heading); flex: 1; }
+    .stop-line .ct { font-family: var(--mono); color: var(--muted); font-size: 12px; }
+
+    .cargo-line { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; }
+    .cargo-line:last-child { border-bottom: none; }
+    .cargo-line .q { font-family: var(--mono); color: var(--amber); font-weight: 700; flex: 0 0 auto; }
+    .cargo-line .n { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cargo-line .s { color: var(--muted); font-family: var(--mono); flex: 0 0 auto; }
+
+    .pack-btn {
+      display: block; width: calc(100% - 28px); margin: 14px;
+      font: inherit; font-weight: 800; font-size: 14px; letter-spacing: 0.06em;
+      text-transform: uppercase; cursor: pointer;
+      background: var(--amber); color: #1c1206;
+      border: none; border-radius: 7px; padding: 13px;
+    }
+    .pack-btn:hover { background: #fbbf24; }
+
+    /* ── Center: viewer + HUD ── */
+    .center { position: relative; display: flex; flex-direction: column; }
+    #viewer { flex: 1; min-height: 320px; }
+    #viewer canvas { display: block; }
+    .hud-tl {
+      position: absolute; top: 12px; left: 14px;
+      font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted); background: rgba(10, 12, 14, 0.75);
+      padding: 6px 11px; border: 1px solid var(--border); border-radius: 6px;
+    }
+    .hud-tl b { color: var(--heading); }
+    .hud-tr { position: absolute; top: 12px; right: 14px; display: flex; gap: 6px; }
+    .hud-btn {
+      font: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.05em;
+      text-transform: uppercase; cursor: pointer;
+      background: rgba(10, 12, 14, 0.75); color: var(--muted);
+      border: 1px solid var(--border); border-radius: 6px; padding: 6px 11px;
+    }
+    .hud-btn:hover { color: var(--amber); border-color: var(--amber); }
+
+    /* ── Timeline scrubber ── */
+    .timeline {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+    }
+    .tl-btn {
+      font: inherit; font-weight: 800; cursor: pointer;
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: 6px;
+      padding: 7px 13px; font-size: 12.5px;
+    }
+    .tl-btn:hover { border-color: var(--amber); color: var(--amber); }
+    .tl-track { flex: 1; display: flex; gap: 5px; }
+    .tl-chip {
+      flex: 1; height: 26px; border-radius: 5px; cursor: pointer;
+      background: var(--panel-2); border: 1px solid var(--border-strong);
+      display: grid; place-items: center;
+      font-family: var(--mono); font-size: 11.5px; font-weight: 700; color: var(--muted);
+    }
+    .tl-chip.done { background: var(--amber-soft); border-color: #6b4a0d; color: var(--amber); }
+    .tl-chip.current { background: var(--amber); border-color: var(--amber); color: #1c1206; }
+    .tl-label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .tl-label b { color: var(--heading); }
+
+    /* ── Right: telemetry ── */
+    .gauge { margin-bottom: 14px; }
+    .gauge .g-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+    .gauge .g-k { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .gauge .g-v { font-family: var(--mono); font-size: 17px; font-weight: 700; color: var(--heading); }
+    .gauge .g-v small { color: var(--muted); font-size: 11.5px; }
+    .g-bar { height: 9px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--border-strong); overflow: hidden; }
+    .g-bar > i { display: block; height: 100%; background: var(--amber); }
+    .g-bar.green > i { background: var(--green); }
+    .g-split { display: flex; height: 20px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border-strong); }
+    .g-split span { display: grid; place-items: center; font-family: var(--mono); font-size: 10.5px; font-weight: 800; }
+    .g-split .a { background: var(--amber-soft); color: var(--amber); }
+    .g-split .b { background: var(--panel-2); color: var(--muted); }
+
+    .status-ok {
+      margin-top: 4px; padding: 10px 12px; border-radius: 6px;
+      background: var(--green-soft); border: 1px solid #14532d;
+      color: var(--green); font-weight: 800; font-size: 12px;
+      letter-spacing: 0.05em; text-transform: uppercase; text-align: center;
+    }
+    .legend-row { display: flex; align-items: center; gap: 9px; padding: 4px 0; font-size: 12.5px; }
+    .legend-row .sw { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; }
+
+    @media (max-width: 980px) {
+      .cockpit { grid-template-columns: 1fr; height: auto; }
+      #viewer { height: 380px; }
+      .col { overflow: visible; }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-banner">
+    <span><strong>DESIGN PREVIEW B — “Cargo Cockpit”</strong> · one-screen control room · demo data, not wired</span>
+    <span class="grow"></span>
+    <a href="/design-a.html">← View Design A</a>
+    <a href="/">Current app</a>
+  </div>
+
+  <header class="cmdbar">
+    <span class="brand">
+      <span class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1 3h13v10H1z" /><path d="M14 7h4l3 3v3h-7z" />
+          <circle cx="6" cy="17" r="1.8" /><circle cx="17.5" cy="17" r="1.8" />
+        </svg>
+      </span>
+      Load Cockpit
+    </span>
+    <button class="trip-select">Friday run — Georgetown <span class="caret">▼</span></button>
+    <span class="grow"></span>
+    <span class="light"><i></i> Packed</span>
+    <span class="light amber"><i></i> Truck <b>20FT</b></span>
+    <span class="light"><i></i> Boxes <b>52</b></span>
+  </header>
+
+  <div class="cockpit">
+    <!-- ══ LEFT: trip builder ══ -->
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head" data-toggle>Truck <span class="grow"></span><span class="count">20FT · SIDE DOOR</span></div>
+        <div class="panel-body">
+          <div class="kv"><span class="k">Cargo box</span><span class="v">600 × 240 × 240</span></div>
+          <div class="kv"><span class="k">Max payload</span><span class="v">8,000 kg</span></div>
+          <div class="kv"><span class="k">Side door</span><span class="v">100 cm from cab</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head" data-toggle>Stops <span class="grow"></span><span class="count">3</span></div>
+        <div class="panel-body">
+          <div class="stop-line"><span class="dot" style="background:#5b9bd5">1</span><span class="nm">Corriverton</span><span class="ct">13 bx</span></div>
+          <div class="stop-line"><span class="dot" style="background:#f0a536">2</span><span class="nm">New Amsterdam</span><span class="ct">14 bx</span></div>
+          <div class="stop-line"><span class="dot" style="background:#3fbf8f">3</span><span class="nm">Georgetown</span><span class="ct">25 bx</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head" data-toggle>Cargo <span class="grow"></span><span class="count">6 LINES</span></div>
+        <div class="panel-body">
+          <div class="cargo-line"><span class="q">12×</span><span class="n">Flour 10kg</span><span class="s">S3</span></div>
+          <div class="cargo-line"><span class="q">6×</span><span class="n">Oil 20L</span><span class="s">S3</span></div>
+          <div class="cargo-line"><span class="q">14×</span><span class="n">Sardines case</span><span class="s">S2</span></div>
+          <div class="cargo-line"><span class="q">10×</span><span class="n">Milk 24pk</span><span class="s">S1</span></div>
+          <div class="cargo-line"><span class="q">8×</span><span class="n">Soap powder box</span><span class="s">S1</span></div>
+          <div class="cargo-line"><span class="q">2×</span><span class="n">Rice sack 45kg</span><span class="s">S3</span></div>
+        </div>
+      </div>
+      <button class="pack-btn">⟳ Re-pack truck</button>
+    </div>
+
+    <!-- ══ CENTER: viewer + timeline ══ -->
+    <div class="col center">
+      <div id="viewer"></div>
+      <div class="hud-tl">Blueprint · <b>Friday run</b></div>
+      <div class="hud-tr">
+        <button class="hud-btn" data-view3d="top">Top</button>
+        <button class="hud-btn" data-view3d="side">Side</button>
+        <button class="hud-btn" data-view3d="doors">Doors</button>
+        <button class="hud-btn" data-view3d="reset">Reset</button>
+        <button class="hud-btn">✎ Edit</button>
+      </div>
+      <div class="timeline">
+        <button class="tl-btn" id="tl-prev">◀</button>
+        <div class="tl-track" id="tl-track"></div>
+        <button class="tl-btn" id="tl-next">▶</button>
+        <span class="tl-label" id="tl-label"><b>Step 3/8</b> · 14× Sardines → REAR</span>
+      </div>
+    </div>
+
+    <!-- ══ RIGHT: telemetry ══ -->
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head">Telemetry</div>
+        <div class="panel-body">
+          <div class="gauge">
+            <div class="g-head"><span class="g-k">Space used</span><span class="g-v">34<small>%</small></span></div>
+            <div class="g-bar"><i style="width:34%"></i></div>
+          </div>
+          <div class="gauge">
+            <div class="g-head"><span class="g-k">Weight</span><span class="g-v">760<small> / 8,000 kg</small></span></div>
+            <div class="g-bar green"><i style="width:9.5%"></i></div>
+          </div>
+          <div class="gauge">
+            <div class="g-head"><span class="g-k">Balance L / R</span><span class="g-v">58<small> / 42</small></span></div>
+            <div class="g-split"><span class="a" style="width:58%">L 58</span><span class="b" style="width:42%">R 42</span></div>
+          </div>
+          <div class="gauge">
+            <div class="g-head"><span class="g-k">Front / Rear</span><span class="g-v">64<small> / 36</small></span></div>
+            <div class="g-split"><span class="a" style="width:64%">F 64</span><span class="b" style="width:36%">R 36</span></div>
+          </div>
+          <div class="status-ok">✓ All cargo aboard</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">Doors</div>
+        <div class="panel-body">
+          <div class="legend-row"><span class="sw" style="background:#1d9e75"></span> Side door — loads first, then closes</div>
+          <div class="legend-row"><span class="sw" style="background:#ef9f27"></span> Rear doors — load second</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">Unload order</div>
+        <div class="panel-body">
+          <div class="stop-line"><span class="dot" style="background:#5b9bd5">1</span><span class="nm">Corriverton</span><span class="ct">FIRST OFF</span></div>
+          <div class="stop-line"><span class="dot" style="background:#f0a536">2</span><span class="nm">New Amsterdam</span><span class="ct">13 left</span></div>
+          <div class="stop-line"><span class="dot" style="background:#3fbf8f">3</span><span class="nm">Georgetown</span><span class="ct">LAST</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="design-demo.js"></script>
+  <script>
+    const scene = mountDemoScene(document.getElementById('viewer'), {
+      bg: 0x0a0c0e, line: 0x4a5560,
+      palette: [0x5b9bd5, 0xf0a536, 0x3fbf8f],
+    });
+    const views = {
+      top: [0.35, 1.45, null], side: [-Math.PI / 2, 0.28, null],
+      doors: [Math.PI, 0.28, null], reset: [0.35, 0.75, null],
+    };
+    document.querySelectorAll('[data-view3d]').forEach((b) =>
+      b.addEventListener('click', () => scene.setView(...views[b.dataset.view3d])));
+
+    // Collapsible left panels
+    document.querySelectorAll('[data-toggle]').forEach((h) =>
+      h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed')));
+
+    // Demo timeline scrubber
+    const STEPS = [
+      '12× Flour → SIDE', '6× Oil → SIDE', '14× Sardines → REAR', '10× Milk → REAR',
+      '8× Soap → REAR', '4× Flour → REAR', '2× Rice sacks ON TOP', 'Close doors ✓',
+    ];
+    let cur = 3;
+    const track = document.getElementById('tl-track');
+    function drawTimeline() {
+      track.innerHTML = STEPS.map((s, i) =>
+        `<div class="tl-chip ${i + 1 < cur ? 'done' : ''} ${i + 1 === cur ? 'current' : ''}" data-i="${i + 1}" title="${s}">${i + 1}</div>`).join('');
+      document.getElementById('tl-label').innerHTML =
+        `<b>Step ${cur}/${STEPS.length}</b> · ${STEPS[cur - 1]}`;
+      track.querySelectorAll('.tl-chip').forEach((c) =>
+        c.addEventListener('click', () => { cur = +c.dataset.i; drawTimeline(); }));
+    }
+    document.getElementById('tl-prev').addEventListener('click', () => { cur = Math.max(1, cur - 1); drawTimeline(); });
+    document.getElementById('tl-next').addEventListener('click', () => { cur = Math.min(STEPS.length, cur + 1); drawTimeline(); });
+    drawTimeline();
+  </script>
+</body>
+</html>
