@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Design A — Daylight Dispatch · Truck Load Planner</title>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --surface: #ffffff;
+      --border: #e3e8ef;
+      --border-strong: #cbd5e1;
+      --text: #0f172a;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --accent: #2563eb;
+      --accent-soft: #eff4ff;
+      --success: #059669;
+      --success-soft: #ecfdf5;
+      --warn: #d97706;
+      --warn-soft: #fffbeb;
+      --danger: #dc2626;
+      --danger-soft: #fef2f2;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+      --shadow-md: 0 6px 18px -6px rgba(15, 23, 42, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14.5px;
+      line-height: 1.5;
+    }
+    .preview-banner {
+      background: #1e293b;
+      color: #e2e8f0;
+      font-size: 13px;
+      padding: 8px 16px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .preview-banner strong { color: #fff; }
+    .preview-banner a { color: #7dd3fc; font-weight: 600; text-decoration: none; }
+    .preview-banner .grow { flex: 1; }
+
+    .shell { display: flex; min-height: calc(100vh - 37px); }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 232px;
+      flex: 0 0 232px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 18px 12px;
+      gap: 4px;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 800; font-size: 15.5px; letter-spacing: -0.01em;
+      padding: 4px 10px 16px;
+    }
+    .brand .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--accent); color: #fff;
+      display: grid; place-items: center; flex: 0 0 auto;
+    }
+    .brand .logo svg { width: 19px; height: 19px; }
+    .nav-label {
+      font-size: 11px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--faint); padding: 10px 10px 4px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border-radius: var(--radius-sm);
+      color: var(--muted); font-weight: 600; text-decoration: none;
+      cursor: pointer; border: none; background: none; font: inherit;
+      width: 100%; text-align: left;
+    }
+    .nav-item svg { width: 17px; height: 17px; flex: 0 0 auto; }
+    .nav-item:hover { background: var(--bg); color: var(--text); }
+    .nav-item.is-active { background: var(--accent-soft); color: var(--accent); }
+    .sidebar .spacer { flex: 1; }
+    .user-chip {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px; border-top: 1px solid var(--border); margin-top: 10px;
+    }
+    .user-chip .avatar {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: #fde68a; color: #92400e; font-weight: 800; font-size: 12px;
+      display: grid; place-items: center;
+    }
+    .user-chip .who { font-size: 12.5px; line-height: 1.25; }
+    .user-chip .who strong { display: block; font-size: 13px; }
+    .user-chip .who span { color: var(--muted); }
+
+    /* ── Main ── */
+    .main { flex: 1; min-width: 0; padding: 22px 26px 60px; }
+    .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+    .topbar h1 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
+    .topbar .grow { flex: 1; }
+    .btn {
+      font: inherit; font-weight: 700; cursor: pointer;
+      border-radius: var(--radius-sm); padding: 9px 16px;
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; color: #fff; }
+
+    /* ── Stepper ── */
+    .stepper {
+      display: flex; gap: 0; background: var(--surface);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow); overflow: hidden; margin-bottom: 18px;
+    }
+    .step {
+      flex: 1; display: flex; align-items: center; gap: 11px;
+      padding: 14px 18px; border-right: 1px solid var(--border);
+      min-width: 0;
+    }
+    .step:last-child { border-right: none; }
+    .step .n {
+      width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto;
+      display: grid; place-items: center; font-size: 12.5px; font-weight: 800;
+      background: var(--bg); color: var(--muted); border: 1px solid var(--border-strong);
+    }
+    .step.done .n { background: var(--success-soft); color: var(--success); border-color: #a7f3d0; }
+    .step.current .n { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .step .t { min-width: 0; }
+    .step .t strong { display: block; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .step .t span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+    /* ── Workspace ── */
+    .workspace { display: grid; grid-template-columns: 1fr 330px; gap: 18px; align-items: start; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    .card-head {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border);
+    }
+    .card-head h2 { margin: 0; font-size: 14.5px; font-weight: 800; }
+    .card-head .grow { flex: 1; }
+    .chip-btn {
+      font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+      padding: 5px 11px; border-radius: 999px;
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted);
+    }
+    .chip-btn:hover { color: var(--accent); border-color: var(--accent); }
+    #viewer { height: 470px; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
+    #viewer canvas { display: block; }
+
+    /* ── Inspector ── */
+    .tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .tab {
+      font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+      padding: 11px 14px; border: none; background: none; color: var(--muted);
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+    .pane { padding: 14px 16px; display: none; }
+    .pane.is-active { display: block; }
+    .stat-row { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed var(--border); }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-row .k { color: var(--muted); font-size: 13px; font-weight: 600; }
+    .stat-row .v { font-weight: 800; font-size: 15px; }
+    .bar { height: 7px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; margin-top: 5px; }
+    .bar > i { display: block; height: 100%; background: var(--accent); }
+    .split { display: flex; height: 18px; border-radius: 6px; overflow: hidden; font-size: 10.5px; font-weight: 800; color: #fff; margin-top: 5px; }
+    .split .l { background: var(--accent); display: grid; place-items: center; }
+    .split .r { background: #93b4f7; color: #1e3a8a; display: grid; place-items: center; }
+    .ok-note { margin-top: 12px; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--success-soft); color: var(--success); font-weight: 700; font-size: 13px; }
+
+    .lstep { display: flex; gap: 11px; padding: 9px 0; border-bottom: 1px dashed var(--border); }
+    .lstep:last-child { border-bottom: none; }
+    .lstep .n {
+      width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto;
+      background: var(--text); color: #fff; font-weight: 800; font-size: 13px;
+      display: grid; place-items: center;
+    }
+    .lstep .b { min-width: 0; font-size: 13px; }
+    .lstep .b strong { display: block; font-size: 13.5px; }
+    .lstep .b span { color: var(--muted); }
+    .door-pill { display: inline-block; font-size: 10.5px; font-weight: 800; padding: 1px 8px; border-radius: 999px; margin-right: 5px; }
+    .door-pill.side { background: #d1fae5; color: #065f46; }
+    .door-pill.rear { background: #fef3c7; color: #92400e; }
+
+    /* ── Trips view ── */
+    .trips-table { width: 100%; border-collapse: collapse; }
+    .trips-table th, .trips-table td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+    .trips-table th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); font-weight: 800; }
+    .trips-table tr:hover td { background: var(--accent-soft); cursor: pointer; }
+    .badge { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+    .badge.packed { background: var(--success-soft); color: var(--success); }
+    .badge.draft { background: var(--bg); color: var(--muted); border: 1px solid var(--border-strong); }
+
+    .view { display: none; }
+    .view.is-active { display: block; }
+
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .workspace { grid-template-columns: 1fr; }
+      .stepper { flex-wrap: wrap; }
+      .step { flex: 1 1 50%; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-banner">
+    <span><strong>DESIGN PREVIEW A — “Daylight Dispatch”</strong> · light theme, sidebar layout · demo data, not wired</span>
+    <span class="grow"></span>
+    <a href="/design-b.html">View Design B →</a>
+    <a href="/">Current app</a>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 3h13v10H1z" /><path d="M14 7h4l3 3v3h-7z" />
+            <circle cx="6" cy="17" r="1.8" /><circle cx="17.5" cy="17" r="1.8" />
+          </svg>
+        </span>
+        Load Planner
+      </div>
+      <div class="nav-label">Operations</div>
+      <button class="nav-item is-active" data-view="plan">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        Plan a load
+      </button>
+      <button class="nav-item" data-view="trips">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Trips
+      </button>
+      <div class="nav-label">Setup</div>
+      <button class="nav-item" title="Demo only">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2M3 8v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8M3 8h18"/></svg>
+        Products
+      </button>
+      <button class="nav-item" title="Demo only">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 3h13v10H1zM14 7h4l3 3v3h-7z"/><circle cx="6" cy="17" r="1.8"/><circle cx="17.5" cy="17" r="1.8"/></svg>
+        Trucks
+      </button>
+      <span class="spacer"></span>
+      <div class="user-chip">
+        <span class="avatar">PK</span>
+        <span class="who"><strong>P. Ketwaroo &amp; Sons</strong><span>Skeldon depot</span></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ══ PLAN VIEW ══ -->
+      <div class="view is-active" id="view-plan">
+        <div class="topbar">
+          <h1>Friday run — Georgetown</h1>
+          <span class="grow"></span>
+          <button class="btn">Print load sheet</button>
+          <button class="btn-primary btn">✎ Edit layout</button>
+        </div>
+
+        <div class="stepper">
+          <div class="step done"><span class="n">✓</span><span class="t"><strong>Truck</strong><span>20ft truck · side door</span></span></div>
+          <div class="step done"><span class="n">✓</span><span class="t"><strong>Stops</strong><span>Corriverton → New Amsterdam → G/town</span></span></div>
+          <div class="step done"><span class="n">✓</span><span class="t"><strong>Items</strong><span>6 lines · 52 boxes</span></span></div>
+          <div class="step current"><span class="n">4</span><span class="t"><strong>Packed</strong><span>ready to load</span></span></div>
+        </div>
+
+        <div class="workspace">
+          <div class="card">
+            <div class="card-head">
+              <h2>3D Blueprint</h2>
+              <span class="grow"></span>
+              <button class="chip-btn" data-view3d="top">Top</button>
+              <button class="chip-btn" data-view3d="side">Side</button>
+              <button class="chip-btn" data-view3d="doors">Doors</button>
+              <button class="chip-btn" data-view3d="reset">Reset</button>
+            </div>
+            <div id="viewer"></div>
+          </div>
+
+          <div class="card">
+            <div class="tabs">
+              <button class="tab is-active" data-tab="stats">Stats</button>
+              <button class="tab" data-tab="steps">Load steps</button>
+              <button class="tab" data-tab="issues">Issues</button>
+            </div>
+            <div class="pane is-active" id="pane-stats">
+              <div class="stat-row"><span class="k">Space used</span><span class="v">34%</span></div>
+              <div class="bar"><i style="width:34%"></i></div>
+              <div class="stat-row" style="margin-top:8px"><span class="k">Weight</span><span class="v">760 / 8,000 kg</span></div>
+              <div class="bar"><i style="width:9.5%"></i></div>
+              <div class="stat-row" style="margin-top:8px"><span class="k">Balance L / R</span><span class="v">58 / 42</span></div>
+              <div class="split"><span class="l" style="width:58%">58</span><span class="r" style="width:42%">42</span></div>
+              <div class="stat-row" style="margin-top:8px"><span class="k">Front / Rear</span><span class="v">64 / 36</span></div>
+              <div class="split"><span class="l" style="width:64%">64</span><span class="r" style="width:36%">36</span></div>
+              <div class="ok-note">✓ No warnings — load is road-ready</div>
+            </div>
+            <div class="pane" id="pane-steps">
+              <div class="lstep"><span class="n">1</span><span class="b"><strong>12 × Flour 10kg</strong><span><span class="door-pill side">SIDE</span>Stop 3 — Georgetown · front, on the floor</span></span></div>
+              <div class="lstep"><span class="n">2</span><span class="b"><strong>6 × Oil 20L</strong><span><span class="door-pill side">SIDE</span>Stop 3 — Georgetown · front, stacked on top</span></span></div>
+              <div class="lstep"><span class="n">3</span><span class="b"><strong>14 × Sardines case</strong><span><span class="door-pill rear">REAR</span>Stop 2 — New Amsterdam · middle, on the floor</span></span></div>
+              <div class="lstep"><span class="n">4</span><span class="b"><strong>10 × Milk 24pk</strong><span><span class="door-pill rear">REAR</span>Stop 1 — Corriverton · near the doors</span></span></div>
+              <div class="lstep"><span class="n">5</span><span class="b"><strong>2 × Rice sack 45kg</strong><span><span class="door-pill rear">REAR</span>Stop 3 · laid on top — do not stack on</span></span></div>
+            </div>
+            <div class="pane" id="pane-issues">
+              <div class="ok-note">✓ Everything fits — nothing left behind</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ TRIPS VIEW ══ -->
+      <div class="view" id="view-trips">
+        <div class="topbar">
+          <h1>Trips</h1>
+          <span class="grow"></span>
+          <button class="btn-primary btn">+ New trip</button>
+        </div>
+        <div class="card">
+          <table class="trips-table">
+            <thead><tr><th>Trip</th><th>Truck</th><th>Stops</th><th>Boxes</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Friday run — Georgetown</strong></td><td>20ft truck</td><td>3</td><td>52</td><td><span class="badge packed">Packed</span></td><td>1 Jul</td></tr>
+              <tr><td><strong>Wed — Corriverton only</strong></td><td>Canter 3.5t</td><td>1</td><td>18</td><td><span class="badge packed">Packed</span></td><td>29 Jun</td></tr>
+              <tr><td><strong>Monday mixed run</strong></td><td>20ft truck</td><td>4</td><td>61</td><td><span class="badge draft">Draft</span></td><td>28 Jun</td></tr>
+              <tr><td><strong>Friday run — Georgetown</strong></td><td>20ft truck</td><td>3</td><td>49</td><td><span class="badge packed">Packed</span></td><td>26 Jun</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="design-demo.js"></script>
+  <script>
+    const scene = mountDemoScene(document.getElementById('viewer'), {
+      bg: 0xf8fafc, line: 0x94a3b8,
+      palette: [0x2563eb, 0xd97706, 0x059669],
+    });
+    // View preset chips
+    const views = {
+      top: [0.35, 1.45, null], side: [-Math.PI / 2, 0.28, null],
+      doors: [Math.PI, 0.28, null], reset: [0.35, 0.75, null],
+    };
+    document.querySelectorAll('[data-view3d]').forEach((b) =>
+      b.addEventListener('click', () => scene.setView(...views[b.dataset.view3d])));
+    // Inspector tabs
+    document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((x) => x.classList.toggle('is-active', x === t));
+      document.querySelectorAll('.pane').forEach((p) =>
+        p.classList.toggle('is-active', p.id === 'pane-' + t.dataset.tab));
+    }));
+    // Sidebar views
+    document.querySelectorAll('.nav-item[data-view]').forEach((n) => n.addEventListener('click', () => {
+      document.querySelectorAll('.nav-item').forEach((x) => x.classList.toggle('is-active', x === n));
+      document.querySelectorAll('.view').forEach((v) =>
+        v.classList.toggle('is-active', v.id === 'view-' + n.dataset.view));
+    }));
+  </script>
+</body>
+</html>
