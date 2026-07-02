@@ -36,6 +36,65 @@ async function loadProducts() {
   state.products = await api('/products');
 }
 
+// ===== Recent trips: reopen, duplicate as a template, delete =====
+async function loadTrips() {
+  const trips = await api('/trips');
+  if (!Array.isArray(trips)) return;
+  const section = document.getElementById('trips-section');
+  const list = document.getElementById('trip-list');
+  if (!trips.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  const truckName = (id) => {
+    const t = (state.trucks || []).find((x) => x.id === id);
+    return t ? t.name : '—';
+  };
+  const fmtDate = (d) => {
+    const dt = new Date(d);
+    return isNaN(dt) ? '' : dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  };
+  list.innerHTML = trips.slice(0, 8).map((t) => `
+    <div class="trip-row">
+      <div class="trip-row-main">
+        <span class="trip-row-name">${esc(t.name)}</span>
+        <span class="trip-row-meta">${esc(fmtDate(t.created_at))} · ${esc(truckName(t.truck_id))}</span>
+      </div>
+      <span class="trip-badge ${t.status === 'packed' ? 'trip-badge--packed' : ''}">${t.status === 'packed' ? 'Packed' : 'Draft'}</span>
+      <button class="btn-ghost" onclick="openTrip(${esc(t.id)})">Open</button>
+      <button class="btn-ghost" onclick="duplicateTrip(${esc(t.id)})" title="Start a new trip with the same stops and items">Duplicate</button>
+      <button class="btn-ghost trip-del" onclick="deleteTrip(${esc(t.id)})" title="Delete this trip">✕</button>
+    </div>`).join('');
+}
+
+window.openTrip = (id) => { location.href = '/?trip=' + id; };
+
+window.duplicateTrip = async (id) => {
+  const src = await api(`/trips/${id}`);
+  if (!src || src.error) { alert('Could not load that trip'); return; }
+  const copy = await api('/trips', { method: 'POST', body: JSON.stringify({
+    name: (src.name || 'Trip') + ' (copy)',
+    truck_id: src.truck_id,
+    priority_preset: src.priority_preset,
+  }) });
+  if (copy.error) { alert(copy.error); return; }
+  const savedStops = await api(`/trips/${copy.id}/stops`, { method: 'PUT', body: JSON.stringify({
+    stops: (src.stops || []).map((s) => ({ label: s.label, lat: s.lat, lng: s.lng, type: s.type })),
+  }) });
+  const stopIdxById = Object.fromEntries((src.stops || []).map((s, i) => [s.id, i]));
+  const items = (src.items || []).map((it) => ({
+    stop_id: (savedStops[stopIdxById[it.stop_id]] || {}).id,
+    product_id: it.product_id,
+    quantity: it.quantity,
+  })).filter((it) => it.stop_id);
+  await api(`/trips/${copy.id}/items`, { method: 'PUT', body: JSON.stringify({ items }) });
+  location.href = '/?trip=' + copy.id;
+};
+
+window.deleteTrip = async (id) => {
+  if (!confirm('Delete this trip? This cannot be undone.')) return;
+  await api(`/trips/${id}`, { method: 'DELETE' });
+  await loadTrips();
+};
+
 document.getElementById('new-trip').onclick = async () => {
   const truckSel = document.getElementById('truck-select');
   const statusEl = document.getElementById('trip-status');
@@ -145,6 +204,7 @@ document.getElementById('pack-btn').onclick = async () => {
   if (result.error) { alert(result.error); return; }
   showResult(result);
   document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
+  loadTrips(); // refresh the Recent trips badges (draft → packed)
 };
 
 (async function init() {
@@ -158,8 +218,11 @@ document.getElementById('pack-btn').onclick = async () => {
   // Initial readiness check (will set pack button disabled)
   checkPackReady();
 
-  // Deep-link: open the app with ?trip=<id> to jump straight to that trip's packed
-  // blueprint (ready to Edit) instead of rebuilding it by hand.
+  await loadTrips();
+
+  // Deep-link: open the app with ?trip=<id> to jump straight to that trip — the
+  // whole form (name, preset, stops, items) is hydrated so the trip is editable
+  // and the load sheet shows the real stop names, then the packed blueprint shows.
   const tripParam = new URLSearchParams(location.search).get('trip');
   if (tripParam) {
     const trip = await api(`/trips/${tripParam}`);
@@ -167,6 +230,21 @@ document.getElementById('pack-btn').onclick = async () => {
       state.tripId = trip.id;
       const sel = document.getElementById('truck-select');
       if (trip.truck_id) sel.value = String(trip.truck_id);
+      document.getElementById('trip-name').value = trip.name || '';
+      if (trip.priority_preset) document.getElementById('preset').value = trip.priority_preset;
+      state.stops = (trip.stops || []).map((s) => ({ label: s.label || '' }));
+      const stopIdxById = Object.fromEntries((trip.stops || []).map((s, i) => [s.id, i]));
+      state.items = (trip.items || []).map((it) => ({
+        stopIdx: stopIdxById[it.stop_id] ?? 0,
+        product_id: it.product_id,
+        quantity: it.quantity,
+      }));
+      document.getElementById('trip-body').classList.remove('is-gated');
+      const statusEl = document.getElementById('trip-status');
+      statusEl.textContent = `✓ Reopened "${trip.name || 'Trip'}" — edit below or re-pack.`;
+      statusEl.className = 'trip-status is-success';
+      statusEl.style.display = '';
+      renderStops(); renderItems(); checkPackReady();
       if (trip.packing_result && trip.packing_result.placements) {
         showResult(trip.packing_result);
         document.getElementById('result-section').scrollIntoView({ behavior: 'smooth' });
@@ -336,13 +414,34 @@ function renderStatsOnly(s) {
 }
 window.renderStatsOnly = renderStatsOnly;
 
+// Group unplaced entries into "N× product — why" lines the crew/office can act on.
+const UNPLACED_REASON = {
+  unmeasured: 'no size saved — add it on the Products page',
+  no_space: 'no room left in the truck',
+  over_weight: 'over the truck weight limit',
+  zero_quantity: 'quantity was zero',
+  orphaned_stop: 'its stop was removed',
+};
+function groupUnplaced(unplaced) {
+  const groups = new Map();
+  for (const u of unplaced || []) {
+    const name = u.product_name || 'Unknown item';
+    const key = `${name}|${u.reason}`;
+    if (!groups.has(key)) groups.set(key, { name, reason: u.reason, count: 0 });
+    groups.get(key).count++;
+  }
+  return [...groups.values()];
+}
+
 function showResult(result) {
   document.getElementById('result-section').style.display = 'block';
   const s = result.stats;
   renderStatsOnly(s);
-  if (result.unplaced && result.unplaced.length) {
+  const notLoaded = groupUnplaced(result.unplaced);
+  if (notLoaded.length) {
+    const total = notLoaded.reduce((n, g) => n + g.count, 0);
     document.getElementById('stats').insertAdjacentHTML('beforeend',
-      `<span class="stat stat-danger"><span class="stat-label">Unplaced</span><span class="stat-value">${result.unplaced.length} item(s)</span></span>`);
+      `<span class="stat stat-danger"><span class="stat-label">Not loaded</span><span class="stat-value">${total} box(es)</span></span>`);
   }
 
   // ===== WORKER-FRIENDLY LOADING INSTRUCTIONS =====
@@ -446,6 +545,14 @@ function showResult(result) {
        <div class="ls-blueprint">
          <img id="print-blueprint" alt="3D loading blueprint of the packed truck" />
        </div>
+
+       ${notLoaded.length ? `
+       <div class="ls-notloaded">
+         <div class="ls-notloaded-title">⚠ NOT LOADED — tell the office before leaving</div>
+         <ul class="ls-notloaded-list">
+           ${notLoaded.map((g) => `<li><strong>${g.count}× ${esc(g.name)}</strong> — ${esc(UNPLACED_REASON[g.reason] || g.reason)}</li>`).join('')}
+         </ul>
+       </div>` : ''}
 
        <div class="ls-instructions-title">Load in this exact order — start with Step 1</div>
        <div class="ls-steps">${stepCards}</div>

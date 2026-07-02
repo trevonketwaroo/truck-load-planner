@@ -343,7 +343,8 @@
       used += p.length_cm * p.width_cm * p.height_cm;
       const w = Number(p.weight_kg) || 0; wt += w;
       (p.y_cm + p.width_cm / 2 < t.width / 2 ? (mL += w) : (mR += w));
-      (p.x_cm + p.length_cm / 2 < t.length / 2 ? (mF += w) : (mRe += w));
+      // x=0 is the REAR doors, x=length is the cab/FRONT wall.
+      (p.x_cm + p.length_cm / 2 >= t.length / 2 ? (mF += w) : (mRe += w));
     }
     const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
     const lr = mL + mR, fr = mF + mRe;

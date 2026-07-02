@@ -480,3 +480,60 @@ test('applyDoorSequencing: rear-only path tags all rear, side path splits at x',
   assert.equal(b.find((p) => p.box_id === 'rear').load_via, 'rear');
   assert.ok(b.find((p) => p.box_id === 'cab').load_order < b.find((p) => p.box_id === 'rear').load_order);
 });
+
+test('computeStats: weight against the cab wall reads as FRONT-heavy (x=0 is the rear doors)', () => {
+  // One box flush against the cab/front wall (high x). Front % must be 100.
+  const cabBox = { box_id: 'cab', stop_index: 0,
+    x_cm: truck.length - 100, y_cm: 0, z_cm: 0,
+    length_cm: 100, width_cm: 100, height_cm: 100 };
+  const stats = computeStats([cabBox], [box('cab', 0, 100, 100, 100, 50)], truck);
+  assert.equal(stats.balance_front_pct, 100);
+  assert.equal(stats.balance_rear_pct, 0);
+
+  // And a box at the rear doors (x=0) must read as REAR-heavy.
+  const rearBox = { ...cabBox, box_id: 'rear', x_cm: 0 };
+  const stats2 = computeStats([rearBox], [box('rear', 0, 100, 100, 100, 50)], truck);
+  assert.equal(stats2.balance_front_pct, 0);
+  assert.equal(stats2.balance_rear_pct, 100);
+});
+
+test('non-stackable box has nothing placed on top of it', () => {
+  const boxes = [
+    box('frag', 0, 80, 80, 40, 5, { stackable: false }),
+    ...Array.from({ length: 10 }, (_, i) => box(`r${i}`, 0, 80, 80, 80, 10)),
+  ];
+  const { placements, unplaced } = placeBoxes(boxes, truck, 'balanced');
+  assert.equal(unplaced.length, 0);
+  const frag = placements.find((p) => p.box_id === 'frag');
+  assert.ok(frag, 'non-stackable box was placed');
+  const fragTop = frag.z_cm + frag.height_cm;
+  for (const p of placements) {
+    if (p.box_id === 'frag') continue;
+    const footOverlap =
+      p.x_cm < frag.x_cm + frag.length_cm && p.x_cm + p.length_cm > frag.x_cm &&
+      p.y_cm < frag.y_cm + frag.width_cm && p.y_cm + p.width_cm > frag.y_cm;
+    assert.ok(!(footOverlap && p.z_cm >= fragTop - 0.001),
+      `${p.box_id} sits on top of the non-stackable box`);
+  }
+});
+
+test('non-stackable survives the full pack pipeline with nothing above it', () => {
+  const items = [
+    { id: 1, product_id: 1, stop_index: 0, quantity: 8,
+      length_cm: 80, width_cm: 80, height_cm: 80, weight_kg: 10, stackable: true, top_only: false },
+    { id: 2, product_id: 2, stop_index: 0, quantity: 1,
+      length_cm: 80, width_cm: 80, height_cm: 40, weight_kg: 5, stackable: false, top_only: false },
+  ];
+  const result = pack({ truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 2000 }, items });
+  assert.equal(result.unplaced.length, 0);
+  const frag = result.placements.find((p) => String(p.box_id).startsWith('2-'));
+  const fragTop = frag.z_cm + frag.height_cm;
+  for (const p of result.placements) {
+    if (p.box_id === frag.box_id) continue;
+    const footOverlap =
+      p.x_cm < frag.x_cm + frag.length_cm && p.x_cm + p.length_cm > frag.x_cm &&
+      p.y_cm < frag.y_cm + frag.width_cm && p.y_cm + p.width_cm > frag.y_cm;
+    assert.ok(!(footOverlap && p.z_cm >= fragTop - 0.001),
+      `${p.box_id} sits on top of the non-stackable box after gravity`);
+  }
+});

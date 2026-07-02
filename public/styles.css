@@ -798,6 +798,60 @@ details > .row { padding: 14px; }
 .ls-unload-row { font-size: 15px; margin: 4px 0; color: var(--text); }
 .ls-first { color: var(--warning); font-weight: 800; }
 
+/* Items that did not make it onto the truck — must be impossible to miss */
+.ls-notloaded {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+.ls-notloaded-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+.ls-notloaded-list { margin: 0; padding-left: 22px; }
+.ls-notloaded-list li { font-size: 15px; margin: 4px 0; color: var(--text); }
+
+/* ---------- Recent trips ---------- */
+.trip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.trip-row:last-child { border-bottom: none; }
+.trip-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.trip-row-name {
+  font-weight: 700;
+  color: var(--text-heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trip-row-meta { font-size: 12.5px; color: var(--text-muted); }
+.trip-row .btn-ghost { padding: 6px 12px; min-height: 34px; font-size: 13px; flex: 0 0 auto; }
+.trip-row .trip-del { color: var(--danger); }
+.trip-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.trip-badge--packed {
+  color: var(--success);
+  border-color: rgba(52, 211, 153, 0.4);
+  background: var(--success-soft);
+}
+
 .print-btn { margin-top: 18px; }
 
 /* ---------- Footer ---------- */
@@ -1072,7 +1126,7 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   #edit-bar, .edit-bar, #edit-hint, .edit-hint,
   #edit-enter, .card-head button, .ctx-menu,
   /* Only the load-planner page has these; hide everything above the sheet. */
-  #truck-section, #result-section > .card-head { display: none !important; }
+  #truck-section, #trips-section, #result-section > .card-head { display: none !important; }
 
   /* The result section carries the whole printed sheet — strip its card chrome. */
   #result-section {
@@ -1164,6 +1218,15 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
   .ls-unload { break-inside: avoid; }
   .ls-unload-row { font-size: 12pt !important; color: #000 !important; }
   .ls-first { color: #000 !important; font-weight: 900 !important; text-decoration: underline; }
+
+  /* Not-loaded warning must survive black-and-white printing */
+  .ls-notloaded {
+    break-inside: avoid;
+    background: #fff !important;
+    border: 3px solid #000 !important;
+  }
+  .ls-notloaded-title { font-size: 15pt !important; font-weight: 900 !important; color: #000 !important; }
+  .ls-notloaded-list li { font-size: 12pt !important; color: #000 !important; }
 
   /* Keep door badges filled so they read on a black-and-white printer too. */
   .door-tag {

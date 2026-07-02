@@ -59,8 +59,10 @@ function sortForPreset(group, preset) {
 function placeBoxes(boxes, truck, preset) {
   const placements = [];
   const unplaced = [];
-  const regular = boxes.filter((b) => !b.top_only);
-  const tops = boxes.filter((b) => b.top_only);
+  // Non-stackable boxes must have nothing on top of them, so they go through the
+  // same top-layer pass as top_only sacks (nothing is ever placed above that layer).
+  const regular = boxes.filter((b) => !b.top_only && b.stackable !== false);
+  const tops = boxes.filter((b) => b.top_only || b.stackable === false);
 
   const stops = [...new Set(regular.map((b) => b.stop_index))].sort((a, b) => a - b);
   let bandStartX = 0;
@@ -100,30 +102,52 @@ function placeBoxes(boxes, truck, preset) {
     bandStartX = x + rowDepth;
   }
 
-  // top_only / sacks: laid on top across the whole load, filling from the door end.
-  // NOTE (Phase 1): top items are NOT stop-banded — a late-stop sack may sit near the
-  // door physically. Its stop_index is still correct for coloring/load-order. Phase 2/3
-  // will band sacks per stop too.
-  let tx = 0, ty = 0, tz = topSurface(placements);
-  let tRowDepth = 0;
+  // Top-layer pass: top_only sacks and non-stackable boxes. Each rests on the LOCAL
+  // top surface under its footprint (not one flat height), scanning door-to-cab for
+  // the first spot with headroom. Nothing is ever placed on a top-layer box — so
+  // non-stackable boxes are never crushed and sacks never bear weight.
+  // NOTE (Phase 1): top-layer items are NOT stop-banded — a late-stop sack may sit
+  // near the door physically. Its stop_index is still correct for coloring/load-order.
+  const topsPlaced = [];
+  const localTop = (x, y, l, w) => {
+    let z = 0;
+    for (const p of placements) {
+      if (x < p.x_cm + p.length_cm && x + l > p.x_cm &&
+          y < p.y_cm + p.width_cm && y + w > p.y_cm) {
+        z = Math.max(z, p.z_cm + p.height_cm);
+      }
+    }
+    return z;
+  };
   for (const b of tops) {
-    if (b.l > truck.length || b.w > truck.width) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    if (tz + b.h > truck.height) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    if (ty + b.w > truck.width) { ty = 0; tx += tRowDepth; tRowDepth = 0; }
-    if (tx + b.l > truck.length) { unplaced.push({ box_id: b.id, reason: 'no_space' }); continue; }
-    placements.push({
-      box_id: b.id, stop_index: b.stop_index,
-      x_cm: tx, y_cm: ty, z_cm: tz,
-      length_cm: b.l, width_cm: b.w, height_cm: b.h,
-    });
-    ty += b.w;
-    tRowDepth = Math.max(tRowDepth, b.l);
+    if (b.l > truck.length || b.w > truck.width || b.h > truck.height) {
+      unplaced.push({ box_id: b.id, reason: 'no_space' });
+      continue;
+    }
+    let placed = false;
+    for (let tx = 0; tx + b.l <= truck.length && !placed; tx += b.l) {
+      for (let ty = 0; ty + b.w <= truck.width; ty += b.w) {
+        // never rest on another top-layer box
+        const onTops = topsPlaced.some((p) =>
+          tx < p.x_cm + p.length_cm && tx + b.l > p.x_cm &&
+          ty < p.y_cm + p.width_cm && ty + b.w > p.y_cm);
+        if (onTops) continue;
+        const z = localTop(tx, ty, b.l, b.w);
+        if (z + b.h > truck.height) continue;
+        const placement = {
+          box_id: b.id, stop_index: b.stop_index,
+          x_cm: tx, y_cm: ty, z_cm: z,
+          length_cm: b.l, width_cm: b.w, height_cm: b.h,
+        };
+        placements.push(placement);
+        topsPlaced.push(placement);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) unplaced.push({ box_id: b.id, reason: 'no_space' });
   }
   return { placements, unplaced };
-}
-
-function topSurface(placements) {
-  return placements.reduce((max, p) => Math.max(max, p.z_cm + p.height_cm), 0);
 }
 
 function computeStats(placements, boxes, truck) {
@@ -136,8 +160,9 @@ function computeStats(placements, boxes, truck) {
     totalW += w;
     const cy = p.y_cm + p.width_cm / 2;
     if (cy < truck.width / 2) mLeft += w; else mRight += w;
+    // x=0 is the REAR doors, x=length is the cab/FRONT wall.
     const cx = p.x_cm + p.length_cm / 2;
-    if (cx < truck.length / 2) mFront += w; else mRear += w;
+    if (cx >= truck.length / 2) mFront += w; else mRear += w;
   }
   const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
   const lr = mLeft + mRight, fr = mFront + mRear;
