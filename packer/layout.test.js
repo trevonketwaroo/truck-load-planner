@@ -94,6 +94,62 @@ test('supportArea: unsupported/floating box => 0', () => {
   assert.equal(Layout.supportArea(floating, [base]), 0);
 });
 
+test('bracedFraction: box flush in a corner (two walls) => 1', () => {
+  const b = box(0, 0, 0, 40, 40, 40); // touches rear wall (x=0) and left wall (y=0)
+  // corner faces cover half the total perimeter area for a box this shape; the other
+  // two faces (front, right) are open, so this only asserts the corner faces count.
+  const frac = Layout.bracedFraction(b, [], truck);
+  assert.ok(frac >= 0.4 && frac < 0.6); // 2 of 4 equal-area faces backed by walls
+});
+test('bracedFraction: boxed in on all four sides => 1', () => {
+  const b = box(40, 40, 0, 40, 40, 40);
+  const neighbors = [
+    box(0, 40, 0, 40, 40, 40),   // behind (-x)
+    box(80, 40, 0, 40, 40, 40),  // ahead (+x)
+    box(40, 0, 0, 40, 40, 40),   // left (-y)
+    box(40, 80, 0, 40, 40, 40),  // right (+y)
+  ];
+  assert.equal(Layout.bracedFraction(b, neighbors, truck), 1);
+});
+test('bracedFraction: free-standing box mid-floor with no neighbors => 0', () => {
+  const b = box(300, 100, 0, 40, 40, 40); // nowhere near a wall or another box
+  assert.equal(Layout.bracedFraction(b, [], truck), 0);
+});
+test('bracedFraction: neighbor at a different height does not count as bracing', () => {
+  const b = box(40, 40, 0, 40, 40, 200); // tall box
+  const shortNeighbor = box(0, 40, 0, 40, 40, 20); // touches x-plane but far shorter
+  const frac = Layout.bracedFraction(b, [shortNeighbor], truck);
+  assert.ok(frac < 0.25); // only a sliver of the tall face overlaps the short neighbor's height
+});
+
+test('isWellBraced: floor box with full support => true', () => {
+  assert.equal(Layout.isWellBraced(box(0, 0, 0, 40, 40, 40), [], truck), true);
+});
+test('isWellBraced: fully supported low stack (below LOW_STACK bar) => true even unbraced', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(300, 100, 40, 40, 40, 40); // z=40..80, well under 0.4*240=96
+  assert.equal(Layout.isWellBraced(top, [base], truck), true);
+});
+test('isWellBraced: tall stack with weak support => false', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(320, 100, 40, 40, 40, 150); // overhangs the base, top z=190 (above LOW_STACK bar)
+  assert.equal(Layout.isWellBraced(top, [base], truck), false);
+});
+test('isWellBraced: tall stack, full support, no side bracing => false', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(300, 100, 40, 40, 40, 150); // full support, z=40..190, no neighbors on the sides
+  assert.equal(Layout.isWellBraced(top, [base], truck), false);
+});
+test('isWellBraced: tall stack, full support, braced on two sides => true', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(300, 100, 40, 40, 40, 150); // z=40..190
+  // full-height neighbors ahead and behind back 2 of top's 4 equal-area side faces
+  // (bracedFraction 0.5) — enough per BRACE_MIN, matching EN 12642-XL "positive fit".
+  const ahead = box(340, 100, 0, 40, 40, 190);
+  const behind = box(260, 100, 0, 40, 40, 190);
+  assert.equal(Layout.isWellBraced(top, [base, ahead, behind], truck), true);
+});
+
 test('finalizeLayout: returns load_order + stats, bottom loads first', () => {
   const truckFull = { length: 600, width: 240, height: 240, max_payload: 5000, side_door_x_cm: null };
   const placements = [box(0, 0, 0, 60, 40, 30), box(0, 0, 30, 60, 40, 30)]; // stacked
