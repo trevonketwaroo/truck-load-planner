@@ -129,3 +129,39 @@ cab-side of the door line, so a small front-only load tags all-side and the spli
 doors only appears once the load runs deeper than the door. Knowing the reach distance lets us
 define the side-door *zone depth* properly. **Next:** (1) get door reach → zone depth.
 (2) Place side-zone boxes in their own band so the side door physically fills first.
+
+### 2026-07-06 — shared bracing math for the approved braced-packer design (PR #6)
+**Context:** found `docs/superpowers/specs/2026-07-02-braced-packer-design.md` on `master`
+(committed by Trevon this session, not yet pushed) — an approved design for a
+candidate-position packer (`strategy: 'braced'`) that fixes the owner's real complaint:
+"a stable 4-high row gets left alone while the next box starts an even taller free-standing
+column beside it." §6 of that spec calls for shared stability math in `packer/layout.js` so
+the packer and the manual editor judge stability identically. This run implements that
+foundational piece — the smallest useful step toward the approved design, and squarely
+priority-3 (stability) from this brief's own list. **Research:** EN 12642-XL cargo-securing
+standard (https://donbur.co.uk/faqs/load-restraint/what-is-en-12642-xl.html) — a load braced
+by direct wall/neighbor contact ("positive fit") needs no extra strapping; it specifically
+tolerates gaps within ~8cm of the sides. Wang et al.'s WallE heuristic
+(https://onlinelibrary.wiley.com/doi/10.1155/2023/5299891) favors placements that keep
+neighboring stack heights level rather than one tall column standing alone — the same
+"bracing beats a lone tower" idea the spec's §4.2 optimizer priority encodes. **Change:**
+Added `Layout.bracedFraction(box, others, truck)` — fraction of a box's four vertical side
+faces backed by contact-area with a wall or a touching neighbor at matching height — and
+`Layout.isWellBraced(box, others, truck)` — true when floor-supported, or when support +
+side-bracing (`BRACE_MIN=0.5`) is enough, or when the stack is short enough
+(`LOW_STACK_FRACTION=0.4` of truck height) that an unbraced box is still safe. Named constants
+`SUPPORT_MIN=0.7`, `BRACE_MIN=0.5`, `LOW_STACK_FRACTION=0.4` per the spec. Pure, additive —
+no existing function's behavior changed; `placeBoxes`/`applyGravity`/`applyDoorSequencing`
+untouched. Synced `public/layout.js` via `npm run sync-layout` so the browser editor picks up
+the same module. **Tests:** 57 passing (9 new: 4 for `bracedFraction` — corner/boxed-in/
+free-standing/height-mismatch cases — and 5 for `isWellBraced` — floor, low unbraced stack,
+weak support, tall unbraced, tall braced-on-two-sides). No regressions. **Not yet done:** the
+candidate-position placement engine itself (spec §5) and the `needs_strapping` tagging pass
+(spec §5.5/§6) — those consume these helpers but are a much larger, multi-file change than one
+daily run should attempt at once; this PR only lands the shared math they depend on.
+**Next (candidates):** (1) Build `packer/placement.js`'s candidate-spot scoring engine (spec
+§5) behind `strategy: 'braced'`, defaulting to `'shelf'` so nothing live changes. (2) Wire
+`isWellBraced` into a `needs_strapping` tagging pass so the *existing* shelf packer can at
+least flag its own unstable placements today, ahead of the full braced engine. (3) Resolve the
+still-open side-door reach-distance question from the 2026-06-29 entries (blocked on input from
+Trevon) so `applyDoorSequencing`'s zone becomes a real depth-bounded region.

@@ -54,6 +54,79 @@ Layout.supportArea = function (box, others) {
   return Math.min(covered, footprintArea) / footprintArea;
 };
 
+// How much of range [a0,a1] overlaps range [b0,b1] (0 if disjoint).
+function rangeOverlap(a0, a1, b0, b1) {
+  return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+}
+
+// Fraction (0..1) of `box`'s four vertical side faces backed by a touching neighbor
+// box or a truck wall, weighted by contact area. A face is wall-backed when its plane
+// sits on the truck boundary; it is neighbor-backed when another box's opposite face
+// sits at the same coordinate (within ~1cm) and the two overlap along the shared edge
+// and in height. This is "positive fit" per EN 12642-XL (a load braced by direct
+// contact with walls/neighbors needs no extra strapping) and mirrors the WallE
+// heuristic (Wang et al., https://onlinelibrary.wiley.com/doi/10.1155/2023/5299891),
+// which favors placements that keep neighboring stack heights level rather than one
+// tall column standing free beside shorter ones.
+Layout.bracedFraction = function (box, others, truck) {
+  const x0 = box.x_cm, x1 = x0 + box.length_cm;
+  const y0 = box.y_cm, y1 = y0 + box.width_cm;
+  const z0 = box.z_cm, z1 = z0 + box.height_cm;
+  const TOUCH = 1; // cm tolerance for "touching"
+
+  const faces = [
+    { area: box.width_cm * box.height_cm, wall: x0 <= TOUCH,
+      matches: (o) => Math.abs((o.x_cm + o.length_cm) - x0) <= TOUCH,
+      overlap: (o) => rangeOverlap(y0, y1, o.y_cm, o.y_cm + o.width_cm) *
+        rangeOverlap(z0, z1, o.z_cm, o.z_cm + o.height_cm) },
+    { area: box.width_cm * box.height_cm, wall: Math.abs(truck.length - x1) <= TOUCH,
+      matches: (o) => Math.abs(o.x_cm - x1) <= TOUCH,
+      overlap: (o) => rangeOverlap(y0, y1, o.y_cm, o.y_cm + o.width_cm) *
+        rangeOverlap(z0, z1, o.z_cm, o.z_cm + o.height_cm) },
+    { area: box.length_cm * box.height_cm, wall: y0 <= TOUCH,
+      matches: (o) => Math.abs((o.y_cm + o.width_cm) - y0) <= TOUCH,
+      overlap: (o) => rangeOverlap(x0, x1, o.x_cm, o.x_cm + o.length_cm) *
+        rangeOverlap(z0, z1, o.z_cm, o.z_cm + o.height_cm) },
+    { area: box.length_cm * box.height_cm, wall: Math.abs(truck.width - y1) <= TOUCH,
+      matches: (o) => Math.abs(o.y_cm - y1) <= TOUCH,
+      overlap: (o) => rangeOverlap(x0, x1, o.x_cm, o.x_cm + o.length_cm) *
+        rangeOverlap(z0, z1, o.z_cm, o.z_cm + o.height_cm) },
+  ];
+
+  let backed = 0, total = 0;
+  for (const face of faces) {
+    total += face.area;
+    if (face.area <= 0) continue;
+    if (face.wall) { backed += face.area; continue; }
+    let contact = 0;
+    for (const o of others) {
+      if (o === box || o.box_id === box.box_id) continue;
+      if (!face.matches(o)) continue;
+      contact += face.overlap(o);
+    }
+    backed += Math.min(contact, face.area);
+  }
+  return total > 0 ? backed / total : 0;
+};
+
+Layout.SUPPORT_MIN = 0.7;      // minimum floor/understack support fraction to count as stable
+Layout.BRACE_MIN = 0.5;        // minimum side bracing fraction, for boxes off the floor
+Layout.LOW_STACK_FRACTION = 0.4; // a stack this low relative to truck height is self-stable even unbraced
+
+// True when a box would survive hard braking without extra strapping: it needs solid
+// understack support, and — if it is stacked above the floor — either enough side
+// bracing from neighbors/walls, or a low enough stack height that tipping risk is
+// negligible. Mirrors `packer/layout.js`'s role as the shared stability judge for both
+// the auto-packer and the manual editor's validity cue (see
+// docs/superpowers/specs/2026-07-02-braced-packer-design.md §6).
+Layout.isWellBraced = function (box, others, truck) {
+  if (Layout.supportArea(box, others) < Layout.SUPPORT_MIN) return false;
+  if (Math.abs(box.z_cm) < 1) return true; // on the floor: support alone is enough
+  if (Layout.bracedFraction(box, others, truck) >= Layout.BRACE_MIN) return true;
+  const topZ = box.z_cm + box.height_cm;
+  return topZ <= truck.height * Layout.LOW_STACK_FRACTION;
+};
+
 function clampFootprint(b, truck) {
   b.x_cm = Math.max(0, Math.min(truck.length - b.length_cm, b.x_cm));
   b.y_cm = Math.max(0, Math.min(truck.width - b.width_cm, b.y_cm));
