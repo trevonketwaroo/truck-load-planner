@@ -1325,7 +1325,8 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 }
 .measure-fields {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0,…) lets cells shrink below the number-input's large intrinsic width */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
 }
 .measure-fields label {
@@ -1341,6 +1342,7 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 .measure-fields label span { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
 .measure-fields input {
   width: 100%;
+  min-width: 0;
   min-height: 56px;
   font-size: 22px;
   font-weight: 700;
@@ -1399,7 +1401,8 @@ table.products td:first-child { font-weight: 700; color: var(--text-heading); }
 @media (max-width: 640px) {
   body { font-size: 14px; }
   .app-header { padding: 9px 12px; }
-  .app-header .brand { font-size: 13px; }
+  .app-header .brand { font-size: 12px; letter-spacing: 0.02em; }
+  .app-header .nav-link { font-size: 10.5px; padding: 5px 8px; letter-spacing: 0.02em; }
   .row { gap: 8px; }
   .row > label, .row > .field { flex: 1 1 100%; }
   .row > button { width: 100%; }

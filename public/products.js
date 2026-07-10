@@ -141,7 +141,17 @@ function loadMeasure() {
 }
 
 function enterMeasure() {
-  mQueue = products.filter((p) => !isMeasured(p)).map((p) => p.id);
+  // Queue = whatever the list is currently showing (search + "only missing" respected).
+  // Default view shows everything, so re-measuring products that only have placeholder
+  // estimates works; tick "Only missing sizes" to walk just the unmeasured ones.
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const onlyMissing = document.getElementById('only-missing').checked;
+  mQueue = products.filter((p) => {
+    if (onlyMissing && isMeasured(p)) return false;
+    if (q && !(`${p.name} ${p.category || ''}`.toLowerCase().includes(q))) return false;
+    return true;
+  }).map((p) => p.id);
+  if (!mQueue.length) { alert('Nothing matches the current filter.'); return; }
   mIdx = 0;
   document.querySelector('.toolbar').style.display = 'none';
   document.querySelector('.table-card').style.display = 'none';
@@ -202,4 +212,7 @@ document.getElementById('only-missing').addEventListener('change', render);
   products = await api('/products');
   products.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   render();
+  // Deep-link: /products.html?measure=1 jumps straight into measure mode —
+  // bookmark it on a phone for measuring sessions.
+  if (new URLSearchParams(location.search).get('measure')) enterMeasure();
 })();
