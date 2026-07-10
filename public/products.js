@@ -23,6 +23,20 @@ function isMeasured(p) {
   return p.length_cm && p.width_cm && p.height_cm && p.weight_kg;
 }
 
+// Refresh the count line + the progress bar. `showing` optionally appends the
+// filtered-row count when the table is showing a subset.
+function updateProgress(showing) {
+  const total = products.length;
+  const measured = products.filter(isMeasured).length;
+  let txt = `${total} products · ${measured} have sizes · ${total - measured} still need sizes`;
+  if (showing !== undefined && showing !== total) txt += ` · showing ${showing}`;
+  document.getElementById('summary').textContent = txt;
+  const pct = total ? Math.round((measured / total) * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent =
+    total ? `${measured} of ${total} done · ${pct}%` : 'No products';
+}
+
 function render() {
   const q = document.getElementById('search').value.trim().toLowerCase();
   const onlyMissing = document.getElementById('only-missing').checked;
@@ -45,9 +59,7 @@ function render() {
       <td class="save-cell"><button onclick="saveRow(${esc(p.id)}, this)">Save</button> <span class="msg"></span></td>
     </tr>`).join('');
 
-  const measured = products.filter(isMeasured).length;
-  document.getElementById('summary').textContent =
-    `${products.length} products · ${measured} have sizes · ${products.length - measured} still need sizes · showing ${list.length}`;
+  updateProgress(list.length);
 }
 
 window.saveRow = async (id, btn) => {
@@ -74,10 +86,124 @@ window.saveRow = async (id, btn) => {
   tr.className = isMeasured(updated) ? '' : 'dim-missing';
   msg.textContent = 'Saved ✓';
   msg.className = 'msg saved';
-  const measured = products.filter(isMeasured).length;
-  document.getElementById('summary').textContent =
-    `${products.length} products · ${measured} have sizes · ${products.length - measured} still need sizes`;
+  updateProgress();
 };
+
+// ---- Fast entry in the table: Enter saves the row and jumps to the next ----
+document.getElementById('rows').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter') return;
+  const inp = ev.target;
+  if (!(inp instanceof HTMLInputElement) || inp.type !== 'number') return;
+  ev.preventDefault();
+  const tr = inp.closest('tr');
+  const btn = tr.querySelector('.save-cell button');
+  window.saveRow(Number(tr.dataset.id), btn);
+  const next = tr.nextElementSibling;
+  if (next) next.querySelector('.f-l')?.focus();
+});
+
+// ---- Measure mode: one product at a time, big touch inputs, tab/Enter flow ----
+let mQueue = [];
+let mIdx = 0;
+const mEls = () => ({
+  body: document.getElementById('measure-body'),
+  done: document.getElementById('measure-done'),
+  count: document.getElementById('measure-count'),
+  name: document.getElementById('measure-name'),
+  cat: document.getElementById('measure-cat'),
+  l: document.getElementById('m-l'),
+  w: document.getElementById('m-w'),
+  h: document.getElementById('m-h'),
+  kg: document.getElementById('m-kg'),
+});
+
+function loadMeasure() {
+  const e = mEls();
+  if (mIdx >= mQueue.length) {
+    e.body.style.display = 'none';
+    e.done.style.display = 'block';
+    e.count.textContent = 'Done';
+    return;
+  }
+  const p = products.find((x) => x.id === mQueue[mIdx]);
+  if (!p) { mIdx++; return loadMeasure(); }
+  e.body.style.display = '';
+  e.done.style.display = 'none';
+  e.count.textContent = `${mIdx + 1} of ${mQueue.length} to measure`;
+  e.name.textContent = p.name;
+  e.cat.textContent = p.category || '';
+  e.l.value = p.length_cm ?? '';
+  e.w.value = p.width_cm ?? '';
+  e.h.value = p.height_cm ?? '';
+  e.kg.value = p.weight_kg ?? '';
+  e.l.focus();
+  e.l.select();
+}
+
+function enterMeasure() {
+  // Queue = whatever the list is currently showing (search + "only missing" respected).
+  // Default view shows everything, so re-measuring products that only have placeholder
+  // estimates works; tick "Only missing sizes" to walk just the unmeasured ones.
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const onlyMissing = document.getElementById('only-missing').checked;
+  mQueue = products.filter((p) => {
+    if (onlyMissing && isMeasured(p)) return false;
+    if (q && !(`${p.name} ${p.category || ''}`.toLowerCase().includes(q))) return false;
+    return true;
+  }).map((p) => p.id);
+  if (!mQueue.length) { alert('Nothing matches the current filter.'); return; }
+  mIdx = 0;
+  document.querySelector('.toolbar').style.display = 'none';
+  document.querySelector('.table-card').style.display = 'none';
+  document.getElementById('measure-mode').style.display = 'block';
+  loadMeasure();
+}
+
+function exitMeasure() {
+  document.getElementById('measure-mode').style.display = 'none';
+  document.querySelector('.toolbar').style.display = '';
+  document.querySelector('.table-card').style.display = '';
+  render();
+}
+
+async function saveMeasure() {
+  const e = mEls();
+  const p = products.find((x) => x.id === mQueue[mIdx]);
+  if (!p) return;
+  const btn = document.getElementById('measure-save');
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'Saving…';
+  const body = {
+    name: p.name,
+    category: p.category,
+    length_cm: num(e.l.value),
+    width_cm: num(e.w.value),
+    height_cm: num(e.h.value),
+    weight_kg: num(e.kg.value),
+    stackable: p.stackable !== false,
+    top_only: !!p.top_only,
+  };
+  const updated = await api(`/products/${p.id}`, { method: 'PUT', body: JSON.stringify(body) });
+  btn.disabled = false;
+  btn.textContent = prev;
+  if (updated.error) { alert(updated.error); return; }
+  const idx = products.findIndex((x) => x.id === p.id);
+  products[idx] = updated;
+  updateProgress();
+  mIdx += 1;
+  loadMeasure();
+}
+
+document.getElementById('measure-start').addEventListener('click', enterMeasure);
+document.getElementById('measure-exit').addEventListener('click', exitMeasure);
+document.getElementById('measure-done-exit').addEventListener('click', exitMeasure);
+document.getElementById('measure-save').addEventListener('click', saveMeasure);
+document.getElementById('measure-skip').addEventListener('click', () => { mIdx += 1; loadMeasure(); });
+// Enter anywhere in the fields = Save & next (Tab still walks L → W → H → weight natively)
+document.querySelector('.measure-fields').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') { ev.preventDefault(); saveMeasure(); }
+});
 
 document.getElementById('search').addEventListener('input', render);
 document.getElementById('only-missing').addEventListener('change', render);
@@ -86,4 +212,7 @@ document.getElementById('only-missing').addEventListener('change', render);
   products = await api('/products');
   products.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   render();
+  // Deep-link: /products.html?measure=1 jumps straight into measure mode —
+  // bookmark it on a phone for measuring sessions.
+  if (new URLSearchParams(location.search).get('measure')) enterMeasure();
 })();
