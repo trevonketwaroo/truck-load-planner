@@ -127,6 +127,24 @@ Layout.isWellBraced = function (box, others, truck) {
   return topZ <= truck.height * Layout.LOW_STACK_FRACTION;
 };
 
+// Flag every placement with `needs_strapping`: true when it would NOT survive hard
+// braking without extra strapping per `isWellBraced` (weak understack support, or —
+// once off the floor — neither enough side bracing nor a low enough stack to be
+// self-stable). Additive only: it never repositions a box, so it can run on top of
+// today's shelf packer as an available-now signal ahead of the full candidate-position
+// braced engine (docs/superpowers/specs/2026-07-02-braced-packer-design.md §5.5/§6,
+// which this was flagged as a preparatory step for in the 2026-07-06 log entry).
+// Returns the count of flagged placements.
+Layout.tagStrapping = function (placements, truck) {
+  let count = 0;
+  for (const p of placements) {
+    const braced = Layout.isWellBraced(p, placements, truck);
+    p.needs_strapping = !braced;
+    if (!braced) count++;
+  }
+  return count;
+};
+
 function clampFootprint(b, truck) {
   b.x_cm = Math.max(0, Math.min(truck.length - b.length_cm, b.x_cm));
   b.y_cm = Math.max(0, Math.min(truck.width - b.width_cm, b.y_cm));

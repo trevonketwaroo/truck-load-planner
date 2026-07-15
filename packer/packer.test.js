@@ -517,6 +517,61 @@ test('non-stackable box has nothing placed on top of it', () => {
   }
 });
 
+// ===== Stability: needs_strapping tagging pass (wires Layout.isWellBraced) =====
+
+test('pack: floor-level placements are never flagged needs_strapping', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 240, max_payload_kg: 5000 },
+    items: [{ id: 1, product_id: 1, stop_index: 0, quantity: 2,
+      length_cm: 60, width_cm: 40, height_cm: 30, weight_kg: 10 }],
+    preset: 'balanced',
+  };
+  const r = pack(input);
+  assert.ok(r.placements.every((p) => p.z_cm === 0));
+  assert.ok(r.placements.every((p) => p.needs_strapping === false));
+  assert.equal(r.stats.needs_strapping_count, 0);
+  assert.ok(!r.stats.warnings.some((w) => /strapping/i.test(w)));
+});
+
+test('pack: an unbraced stacked sack is flagged and counted in stats; its base is not', () => {
+  // Short truck (height 100) so a 45cm-tall sack stacked on a 30cm box crosses the
+  // LOW_STACK_FRACTION bar; a single lone sack has no wall/neighbor bracing on 3 of
+  // its 4 side faces, so it fails BRACE_MIN and needs_strapping should be true.
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 100, max_payload_kg: 5000 },
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 1,
+        length_cm: 100, width_cm: 100, height_cm: 30, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 0, quantity: 1,
+        length_cm: 50, width_cm: 50, height_cm: 45, weight_kg: 5, top_only: true },
+    ],
+    preset: 'balanced',
+  };
+  const r = pack(input);
+  const base = r.placements.find((p) => String(p.box_id).startsWith('1-'));
+  const sack = r.placements.find((p) => String(p.box_id).startsWith('2-'));
+  assert.equal(base.needs_strapping, false, 'floor-supported base needs no strapping');
+  assert.equal(sack.needs_strapping, true, 'lone stacked sack with no side bracing needs strapping');
+  assert.equal(r.stats.needs_strapping_count, 1);
+  assert.ok(r.stats.warnings.some((w) => /1 box not fully braced/i.test(w)));
+});
+
+test('pack: needs_strapping tagging is deterministic', () => {
+  const input = {
+    truck: { length_cm: 600, width_cm: 240, height_cm: 100, max_payload_kg: 5000 },
+    items: [
+      { id: 1, product_id: 1, stop_index: 0, quantity: 1,
+        length_cm: 100, width_cm: 100, height_cm: 30, weight_kg: 10 },
+      { id: 2, product_id: 2, stop_index: 0, quantity: 1,
+        length_cm: 50, width_cm: 50, height_cm: 45, weight_kg: 5, top_only: true },
+    ],
+    preset: 'balanced',
+  };
+  const r1 = pack(input);
+  const r2 = pack(input);
+  assert.deepEqual(r1, r2);
+});
+
 test('non-stackable survives the full pack pipeline with nothing above it', () => {
   const items = [
     { id: 1, product_id: 1, stop_index: 0, quantity: 8,

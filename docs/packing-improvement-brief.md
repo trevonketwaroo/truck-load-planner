@@ -165,3 +165,49 @@ daily run should attempt at once; this PR only lands the shared math they depend
 least flag its own unstable placements today, ahead of the full braced engine. (3) Resolve the
 still-open side-door reach-distance question from the 2026-06-29 entries (blocked on input from
 Trevon) so `applyDoorSequencing`'s zone becomes a real depth-bounded region.
+
+### 2026-07-15 — needs_strapping tagging pass (this run)
+**Context:** Item 1 (two-door model) is blocked on a real measurement from Trevon (side-door
+*reach depth* — flagged "need from Trevon" in three straight log entries since 2026-06-29);
+making up a number for real truck geometry risked shipping something confidently wrong, so per
+the working agreement ("bad work is worse than no work") this run did not touch it. PR #3
+(2026-06-30, still open) already covers a different slice of item 3 (banding `top_only` sacks
+per-stop). This run instead picks up candidate #2 from the 2026-07-06 entry directly above:
+wiring the already-merged, already-tested `Layout.isWellBraced` (PR #6) into a tagging pass —
+unblocked, additive, and a direct continuation of the most recently merged stability work.
+**Research:** Re-confirmed EN 12642-XL "positive fit" bracing
+(https://donbur.co.uk/faqs/load-restraint/what-is-en-12642-xl.html) as the standard `isWellBraced`
+already encodes — no new heuristic needed, just applying the existing one everywhere a box lands.
+**Change:** Added `Layout.tagStrapping(placements, truck)` in `packer/layout.js` — loops every
+placement, calls the existing `Layout.isWellBraced`, sets `needs_strapping` on each placement,
+and returns the flagged count. `pack()` in `packer/packer.js` now calls it (via a **lazy**
+`require('./layout')` inside the function body, not a top-level import — layout.js already
+requires packer.js at its top for `finalizeLayout`, so a top-level require the other way would
+deadlock that circular load; calling it lazily at pack()-call-time sidesteps that because by
+then both modules have already finished loading regardless of which one loaded first) after
+gravity/anchor/door-sequencing. `computeStats`'s returned `stats` gets a new
+`needs_strapping_count` field, and a human-readable warning is appended to the existing
+`stats.warnings` array when count > 0 — this reuses the warnings list the UI already renders
+(`public/load-planner.js` line ~433, `.tele-warn`), so the flag is visible in the app with zero
+frontend changes. Nothing about box *position* changed — purely additive tagging. Synced
+`public/layout.js` via `npm run sync-layout`.
+**Tests:** 63 passing (57 prior + 6 new): 3 unit tests for `Layout.tagStrapping` in
+`layout.test.js` (floor box unflagged, tall unbraced stack flagged with count=1, tall
+braced-on-two-sides stack unflagged) and 3 integration tests in `packer.test.js` (floor-only
+pack has zero flags, a short-truck scenario with a lone stacked sack flags exactly that sack and
+not its floor-supported base, and `pack()` stays deterministic with the new field). No
+regressions.
+**Live verify:** Ran the real server against the dev DB — truck id 3 (600×240×240, side door at
+300cm), trip with 10× a 100×100×30 box at stop A and 6× a 50×50×45 top_only sack at stop B.
+`stats.needs_strapping_count: 1`, `stats.warnings` included `"1 box not fully braced by
+walls/neighbors — add strapping or repack closer to a wall"`. Checked all 16 placements: 0
+out-of-bounds, 0 overlaps, 0 floating boxes, anchored flush to the cab wall (`maxX===600`),
+`needs_strapping` present as a boolean on every placement. Verification trip/stops/items deleted
+after the check; verification products (ids 120–121) left in place, matching prior-run precedent.
+**Next (candidates):** (1) Surface `needs_strapping` visually in the 3D blueprint (e.g. a red
+outline or badge on flagged boxes in `public/load-planner.js`) — the data is now computed and
+ready, only the render layer is missing. (2) Build the candidate-spot scoring engine
+(`packer/placement.js`, spec §5) behind `strategy: 'braced'` so the packer can *avoid* creating
+needs_strapping placements in the first place, not just flag them after the fact. (3) Still
+blocked: get the side-door reach-distance measurement from Trevon so item 1 can move past
+tagging into an actual depth-bounded zone.
