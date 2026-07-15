@@ -150,6 +150,32 @@ test('isWellBraced: tall stack, full support, braced on two sides => true', () =
   assert.equal(Layout.isWellBraced(top, [base, ahead, behind], truck), true);
 });
 
+test('tagStrapping: floor box needs no strapping', () => {
+  const b = box(0, 0, 0, 40, 40, 40);
+  const count = Layout.tagStrapping([b], truck);
+  assert.equal(b.needs_strapping, false);
+  assert.equal(count, 0);
+});
+test('tagStrapping: tall unbraced stack is flagged, count reflects it', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(300, 100, 40, 40, 40, 150); // full support, no side neighbors, tall
+  const placements = [base, top];
+  const count = Layout.tagStrapping(placements, truck);
+  assert.equal(base.needs_strapping, false);
+  assert.equal(top.needs_strapping, true);
+  assert.equal(count, 1);
+});
+test('tagStrapping: braced-on-two-sides tall stack is not flagged', () => {
+  const base = box(300, 100, 0, 40, 40, 40);
+  const top = box(300, 100, 40, 40, 40, 150);
+  const ahead = box(340, 100, 0, 40, 40, 190);
+  const behind = box(260, 100, 0, 40, 40, 190);
+  const placements = [base, top, ahead, behind];
+  const count = Layout.tagStrapping(placements, truck);
+  assert.equal(top.needs_strapping, false);
+  assert.equal(count, 0);
+});
+
 test('finalizeLayout: returns load_order + stats, bottom loads first', () => {
   const truckFull = { length: 600, width: 240, height: 240, max_payload: 5000, side_door_x_cm: null };
   const placements = [box(0, 0, 0, 60, 40, 30), box(0, 0, 30, 60, 40, 30)]; // stacked

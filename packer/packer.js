@@ -308,7 +308,20 @@ function pack(input) {
   // the original deepest-first single-opening order.
   applyDoorSequencing(placements, truck);
 
+  // Stability pass: flag placements that would need extra strapping to survive hard
+  // braking (see packer/layout.js Layout.isWellBraced/bracedFraction — EN 12642-XL
+  // "positive fit"). Additive only — tags placements, never repositions them. Required
+  // lazily (not at module top) because layout.js requires this module back for
+  // finalizeLayout; a top-level require here would deadlock that circular load.
+  const strappingCount = require('./layout').tagStrapping(placements, truck);
+
   const stats = computeStats(placements, kept, truck);
+  stats.needs_strapping_count = strappingCount;
+  if (strappingCount > 0) {
+    stats.warnings.push(
+      `${strappingCount} box${strappingCount === 1 ? '' : 'es'} not fully braced by walls/neighbors — add strapping or repack closer to a wall`
+    );
+  }
   return { placements, stats, unplaced: [...unplaced, ...dropped, ...noFit] };
 }
 
