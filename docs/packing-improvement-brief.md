@@ -211,3 +211,56 @@ ready, only the render layer is missing. (2) Build the candidate-spot scoring en
 needs_strapping placements in the first place, not just flag them after the fact. (3) Still
 blocked: get the side-door reach-distance measurement from Trevon so item 1 can move past
 tagging into an actual depth-bounded zone.
+
+### 2026-07-17 — surface needs_strapping in the 3D blueprint (this run)
+**Context:** Item 1 (two-door reach depth) is still blocked on a measurement from Trevon.
+Item 2 (density) has no open PR but its two candidate steps (l↔w rotation, or a full
+heightmap/skyline rewrite of `placeBoxes`) both carry real correctness risk (overlap/LIFO
+regressions) for a single-session change — per the working agreement ("bad work is worse than
+no work") that wasn't attempted today. PR #3 (2026-06-30, sack banding) is still open and
+covers a different slice of item 3. This run instead picked up candidate #1 from the
+2026-07-15 entry directly above: the `needs_strapping` flag (PR #7) was computed and tested but
+invisible in the actual blueprint — a crew looking at the 3D view or the printed load sheet had
+no way to tell *which* box needed strapping, only a count in the telemetry text. That's
+squarely item 4 (blueprint intuitiveness) closing the loop on item 3's already-merged data.
+**Research:** No new heuristic needed — reused the app's own existing visual language: the
+manual editor (`public/editor.js`) already flags invalid boxes with a red (`0xef4444`) edge
+outline during drag-editing (`invalidOutline`/`updateValidityCues`); this run applies the same
+red, same meaning ("this box needs attention"), to the auto-packed blueprint's already-computed
+`needs_strapping` flag, so the color means one thing everywhere in the app.
+**Change:** In `public/load-planner.js`'s `renderBlueprint`, each box's edge-outline color is
+now `STRAP_RED` (`0xef4444`) instead of the default dark gray when `placement.needs_strapping`
+is true, and a small always-visible red "!" badge sprite (`strapBadgeSprite`, one shared
+canvas-texture) is added as a child of the flagged box's mesh — unlike product-name labels,
+this badge is NOT gated by the "Labels" toggle, since it's a safety cue, not a nicety. Added a
+"Safety" legend panel to `public/index.html` / `public/styles.css` (mirrors the existing
+"Doors" legend), shown only when `stats.needs_strapping_count > 0`. Zero changes to
+`packer/packer.js` or `packer/layout.js` — purely a render-layer change on top of the flag PR
+#7 already shipped, so it carries no risk to any hard constraint.
+**Tests:** No new packer tests — there is no new pure logic to test (the flag itself was
+already unit- and integration-tested in PR #7); the 63 existing packer tests were confirmed
+still green, unchanged. Verified instead with a live pack against the dev DB (documented below),
+which is the right verification surface for a render-only change.
+**Live verify:** Ran the real server (port from `.env`) against the dev DB — truck id 3
+(600×240×240, side door at 300cm), a trip with 10× a `VERIFY strap-box` (100×100×30) at stop A
+and 6× the same box + 6× a `VERIFY strap-sack` (50×50×45, top_only) at stop B. Packed:
+`needs_strapping_count: 2`, matching warning text present. Inspected the live Three.js scene
+graph via `window._view.boxMeshes`: exactly the 2 flagged placements had both a red
+(`0xef4444`) edge outline and a badge sprite (22 total meshes, 2 flagged, 2 red edges, 2
+badges — no false positives/negatives). Confirmed the "Safety" legend panel showed. Packed a
+second, clean trip (floor-only boxes, no stacking) and confirmed `needs_strapping_count: 0`,
+the legend panel correctly hid, and zero badge sprites were created. Walked the on-screen
+step-through (`wt-next`/`wt-all`) and confirmed the badge (added as a child of the box mesh)
+correctly disappears/reappears with the box's own visibility, since three.js's renderer skips
+traversing into a mesh's children when the mesh itself is `visible: false` — the same
+parent/child idiom the existing dark edge-outline child already relies on. Verification
+trip/stops/items (ids 31, 32) deleted after the check; verification products `VERIFY strap-box`
+/ `VERIFY strap-sack` (ids 122–123) left in place, matching prior-run precedent.
+**Next (candidates):** (1) Build the candidate-spot scoring engine (`packer/placement.js`, spec
+§5) behind `strategy: 'braced'` so the packer can *avoid* creating needs_strapping placements,
+not just flag+display them. (2) Density: the shelf packer's `rowDepth` reserves a full column's
+depth based on the single longest box ever placed in it (across all its z-rows), wasting the
+difference behind shorter boxes in the same column — a real gap, but fixing it properly needs a
+skyline/heightmap rewrite of `placeBoxes`, which is real-risk enough (overlap/LIFO regressions)
+to deserve its own dedicated, carefully-tested run rather than a rushed slice. (3) Still
+blocked: get the side-door reach-distance measurement from Trevon.
