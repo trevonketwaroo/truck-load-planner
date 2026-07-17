@@ -257,6 +257,7 @@ document.getElementById('pack-btn').onclick = async () => {
 })();
 
 const STOP_COLORS = [0x378add, 0xef9f27, 0x1d9e75, 0xd4537e, 0x7f77dd, 0xd85a30];
+const STRAP_RED = 0xef4444; // matches editor.js's INVALID_RED — same meaning app-wide
 let _threeRenderer = null, _animId = null;
 let _boxMeshes = [], _placements = [], _steps = [], _stepIndex = 0;
 let _anims = [], _truckH = 240;
@@ -390,6 +391,45 @@ function buildLabels(scene, THREE, boxMeshes, maxDim) {
   return sprites;
 }
 
+// Small "!" badge shown on every box flagged needs_strapping — unlike product-name
+// labels this is NEVER gated by the Labels toggle, since it's a safety cue the crew
+// must always see. One shared texture (drawn once) reused across every badge sprite.
+// Added as a child of the box mesh (same idiom as the edge-outline child below), so
+// it automatically hides/shows with the box during the load-order walkthrough.
+let _strapBadgeTex = null;
+function strapBadgeTexture(THREE) {
+  if (_strapBadgeTex) return _strapBadgeTex;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(239,68,68,0.95)';
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#7f1d1d';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 78px system-ui, -apple-system, Segoe UI, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('!', size / 2, size / 2 + 6);
+  _strapBadgeTex = new THREE.CanvasTexture(canvas);
+  return _strapBadgeTex;
+}
+
+function strapBadgeSprite(THREE, placement, maxDim) {
+  const worldScale = Math.max(16, maxDim * 0.045);
+  const mat = new THREE.SpriteMaterial({ map: strapBadgeTexture(THREE), transparent: true, depthTest: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(worldScale, worldScale, 1);
+  // Local coords are relative to the box mesh's centre — offset toward a top corner
+  // so the badge doesn't collide with the product-name label, which sits centred.
+  sprite.position.set(placement.length_cm * 0.32, placement.height_cm / 2 + worldScale * 0.55, -placement.width_cm * 0.32);
+  sprite.raycast = () => {}; // no-op: never intercept editor picking
+  return sprite;
+}
+
 function applyLabelVisibility(sprites) {
   for (const s of sprites) {
     // Show a label when the box is visible (walkthrough) AND either the global toggle is on
@@ -473,6 +513,8 @@ function showResult(result) {
   if (empty) empty.style.display = 'none';
   const s = result.stats;
   renderStatsOnly(s);
+  const strapPanel = document.getElementById('strap-legend-panel');
+  if (strapPanel) strapPanel.style.display = s.needs_strapping_count > 0 ? '' : 'none';
   updateLights('Packed', result.placements.length);
   const notLoaded = groupUnplaced(result.unplaced);
   if (notLoaded.length) {
@@ -652,6 +694,7 @@ function renderBlueprint(result) {
   addDoorMarkers(scene, truck);
 
   _truckH = truck.height;
+  const maxDimForBadge = Math.max(truck.length, truck.width, truck.height);
   _boxMeshes = [];
   for (const p of result.placements) {
     const geo = new THREE.BoxGeometry(p.length_cm, p.height_cm, p.width_cm);
@@ -659,15 +702,19 @@ function renderBlueprint(result) {
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color }));
     const finalY = p.z_cm + p.height_cm / 2;
     mesh.position.set(p.x_cm + p.length_cm / 2, finalY, p.y_cm + p.width_cm / 2);
+    // Same red the manual editor uses for its own validity cue (editor.js INVALID_RED)
+    // — one color means "this box needs attention" everywhere in the app.
+    const edgeColor = p.needs_strapping ? STRAP_RED : 0x222222;
     mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x222222 })));
+      new THREE.LineBasicMaterial({ color: edgeColor, linewidth: p.needs_strapping ? 2 : 1 })));
+    if (p.needs_strapping) mesh.add(strapBadgeSprite(THREE, p, maxDimForBadge));
     scene.add(mesh);
     _boxMeshes.push({ order: p.load_order, mesh, finalY, placement: p });
   }
   setupWalkthrough(result.placements);
 
   // --- Orbit camera via spherical coords around the truck centre ---
-  const maxDim = Math.max(truck.length, truck.width, truck.height);
+  const maxDim = maxDimForBadge;
   const centre = new THREE.Vector3(truck.length / 2, truck.height / 2, truck.width / 2);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
   // Zoom bounds keyed to truck size so wheel/pinch can't lose the load.

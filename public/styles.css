@@ -686,6 +686,7 @@ details > .row { padding: 12px; }
 .legend-row .sw { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; }
 .sw-side { background: #1d9e75; }
 .sw-rear { background: #ef9f27; }
+.sw-strap { background: #ef4444; }
 
 /* ---------- 3D viewer "stage" ---------- */
 .viewer-stage {
